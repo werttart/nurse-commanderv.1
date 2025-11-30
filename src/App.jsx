@@ -11,12 +11,18 @@ import {
   ArrowRight, Flag, Calendar, Infinity,
   Smile, Frown, Meh, Zap, Coffee, Shield, Ghost,
   ThumbsDown, ThumbsUp, Sparkles, Angry, Flame,
-  Volume2, VolumeX, Trophy, Medal, Crown, UserCircle
+  Volume2, VolumeX, Trophy, Medal, Crown, UserCircle,
+  Edit, Save // เพิ่มไอคอนสำหรับแก้ไขและบันทึก
 } from 'lucide-react';
 // Firebase Imports
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp } from 'firebase/firestore';
-import { getAuth } from "firebase/auth";
+import { 
+  getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp, 
+  doc, setDoc, getDoc, updateDoc // เพิ่ม updateDoc
+} from 'firebase/firestore';
+import { 
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged 
+} from "firebase/auth";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -29,13 +35,13 @@ const firebaseConfig = {
   measurementId: "G-17WC9T21SD"
 };
 
-// Initialize Firebase directly in the component file for single-file portability
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
 // ==========================================
-// 0. STYLES (KEEPING ORIGINAL 100%)
+// 0. STYLES
 // ==========================================
 const cssStyles = `
   @keyframes ecg-move { 0% { background-position: 0 0; } 100% { background-position: -50px 0; } }
@@ -45,12 +51,6 @@ const cssStyles = `
     background-size: 50px 100%;
     animation: ecg-move 1s linear infinite;
   }
-  .ecg-dead {
-    background: linear-gradient(to right, transparent 50%, #ff0000 50%, transparent 55%);
-    background-size: 100% 2px;
-    background-repeat: no-repeat;
-    background-position: center;
-  }
   .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   .triage-red { border-left: 6px solid #ef4444; background: #fef2f2; }
@@ -58,39 +58,14 @@ const cssStyles = `
   .triage-green { border-left: 6px solid #22c55e; background: #f0fdf4; }
   .animate-phone { animation: ring 0.5s infinite; }
   @keyframes ring { 0% { transform: rotate(0); } 10% { transform: rotate(10deg); } 20% { transform: rotate(-10deg); } 30% { transform: rotate(10deg); } 40% { transform: rotate(-10deg); } 100% { transform: rotate(0); } }
-  
-  /* Scrollbar Hide */
-  .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-  .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
-  .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #555; }
-
-  /* Satisfaction Animations */
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    75% { transform: translateX(5px); }
-  }
   .shake-element { animation: shake 0.3s ease-in-out; }
-
-  @keyframes level-up {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.2); color: #fbbf24; }
-    100% { transform: scale(1); }
-  }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+  @keyframes level-up { 0% { transform: scale(1); } 50% { transform: scale(1.2); color: #fbbf24; } 100% { transform: scale(1); } }
   .anim-level { animation: level-up 0.5s ease-out; }
-  
-  /* New Animations for Rank */
-  @keyframes glow {
-    0% { box-shadow: 0 0 5px #fbbf24; }
-    50% { box-shadow: 0 0 20px #fbbf24, 0 0 10px #fbbf24 inset; }
-    100% { box-shadow: 0 0 5px #fbbf24; }
-  }
-  .rank-glow { animation: glow 2s infinite; }
 `;
 
 // ==========================================
-// 1. SOUND SYSTEM & CONFIG
+// 1. SOUND SYSTEM
 // ==========================================
 const SoundSystem = {
   ctx: null,
@@ -101,9 +76,7 @@ const SoundSystem = {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (AudioContext) SoundSystem.ctx = new AudioContext();
       }
-    } catch (e) {
-      console.error("Sound init failed", e);
-    }
+    } catch (e) { console.error("Sound init failed", e); }
   },
   play: (type) => {
     if (!SoundSystem.enabled || !SoundSystem.ctx) return;
@@ -222,9 +195,6 @@ const MOCK_LEADERBOARD = [
   { rank: 5, name: "GreysAnatomy", xp: 3100, title: "Duty Chief" },
 ];
 
-// ==========================================
-// 2. MAIN COMPONENT
-// ==========================================
 export default function NurseCommanderPro() {
   const formatTime = (seconds) => {
     const date = new Date(0);
@@ -254,18 +224,16 @@ export default function NurseCommanderPro() {
   };
 
   // --- CORE STATE ---
-  const [phase, setPhase] = useState('LOGIN'); // Start with LOGIN
-  const [subPhase, setSubPhase] = useState(null); // 'NORMAL_SETUP', 'RANK_SETUP'
+  const [phase, setPhase] = useState('LOADING'); 
+  const [subPhase, setSubPhase] = useState(null);
   
   // User System State
-  const [user, setUser] = useState({
-    isLoggedIn: false,
-    email: '',
-    nickname: '',
-    xp: 0,
-    matches: 0,
-    wins: 0
-  });
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  
+  // Profile Editing State
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
 
   const [simTime, setSimTime] = useState(28800);
   const [gameSpeed, setGameSpeed] = useState(1);
@@ -273,7 +241,7 @@ export default function NurseCommanderPro() {
   const [score, setScore] = useState(100);
   const [financials, setFinancials] = useState({ revenue: 0, cost: 0, profit: 0 });
   
-  const [gameMode, setGameMode] = useState('NORMAL'); // 'NORMAL' or 'RANKING'
+  const [gameMode, setGameMode] = useState('NORMAL');
 
   const [config, setConfig] = useState({
     ward: 'MED',
@@ -296,27 +264,51 @@ export default function NurseCommanderPro() {
   const [activeCall, setActiveCall] = useState(null);
   const [endGameReport, setEndGameReport] = useState(null);
   const [mobileTab, setMobileTab] = useState('DASHBOARD');
-  
-  // Firebase Leaderboard State
   const [leaderboardData, setLeaderboardData] = useState([]);
 
-  // Input Refs for Login
+  // Login/Register Refs
   const emailRef = useRef(null);
+  const passwordRef = useRef(null);
   const nicknameRef = useRef(null);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const loopRef = useRef(null);
   const SHIFT_DURATION = 8 * 3600;
 
-  // --- LOCAL STORAGE LOAD ---
+  // --- AUTH CHECK ---
   useEffect(() => {
-    const savedUser = localStorage.getItem('nurse_commander_save_v1');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setPhase('MENU'); // If saved, skip login
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setAuthLoading(true);
+      if (currentUser) {
+        // Fetch User Data from Firestore
+        const docRef = doc(db, "users", currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          setUser({ ...docSnap.data(), uid: currentUser.uid });
+        } else {
+          // If no profile (rare case), create default
+          const newUser = {
+            nickname: currentUser.email.split('@')[0],
+            email: currentUser.email,
+            xp: 0,
+            matches: 0,
+            wins: 0
+          };
+          await setDoc(doc(db, "users", currentUser.uid), newUser);
+          setUser({ ...newUser, uid: currentUser.uid });
+        }
+        setPhase('MENU');
+      } else {
+        setUser(null);
+        setPhase('LOGIN');
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
-  
-  // --- FETCH FIREBASE LEADERBOARD ---
+
+  // --- LEADERBOARD FETCH ---
   useEffect(() => {
     if (phase === 'LEADERBOARD') {
         const fetchLeaderboard = async () => {
@@ -327,9 +319,7 @@ export default function NurseCommanderPro() {
                 querySnapshot.forEach((doc) => {
                     fetchedData.push(doc.data());
                 });
-                // If firestore is empty or fails, use mock + local user if needed
                 if(fetchedData.length > 0) {
-                     // Normalize ranks
                      const ranked = fetchedData.map((d, index) => ({...d, rank: index + 1}));
                      setLeaderboardData(ranked);
                 } else {
@@ -337,7 +327,7 @@ export default function NurseCommanderPro() {
                 }
             } catch (error) {
                 console.error("Error fetching leaderboard: ", error);
-                setLeaderboardData(MOCK_LEADERBOARD); // Fallback
+                setLeaderboardData(MOCK_LEADERBOARD);
             }
         };
         fetchLeaderboard();
@@ -345,34 +335,52 @@ export default function NurseCommanderPro() {
   }, [phase]);
 
   // --- AUTH FUNCTIONS ---
-  const handleLogin = (e) => {
+  const handleAuth = async (e) => {
     e.preventDefault();
     const email = emailRef.current.value;
-    const nickname = nicknameRef.current.value;
-
-    if (email && nickname) {
-      const newUser = {
-        isLoggedIn: true,
-        email,
-        nickname,
-        xp: 0,
-        matches: 0,
-        wins: 0
-      };
-      // Check if updating existing or new (mock check)
-      const existing = localStorage.getItem('nurse_commander_save_v1');
-      const finalUser = existing ? { ...JSON.parse(existing), email, nickname } : newUser;
-      
-      setUser(finalUser);
-      localStorage.setItem('nurse_commander_save_v1', JSON.stringify(finalUser));
-      SoundSystem.play('SUCCESS');
-      setPhase('MENU');
+    const password = passwordRef.current.value;
+    
+    try {
+      if (isRegistering) {
+        const nickname = nicknameRef.current.value;
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Create User Profile in Firestore
+        const newUser = {
+          nickname: nickname,
+          email: email,
+          xp: 0,
+          matches: 0,
+          wins: 0
+        };
+        await setDoc(doc(db, "users", userCredential.user.uid), newUser);
+        showToast("Registration Successful!", "success");
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+        showToast("Welcome back!", "success");
+      }
+    } catch (error) {
+      showToast(error.message, "error");
     }
   };
 
-  const handleLogout = () => {
-    setUser({ ...user, isLoggedIn: false });
+  const handleLogout = async () => {
+    await signOut(auth);
     setPhase('LOGIN');
+  };
+
+  const saveProfile = async () => {
+    if (!newName.trim() || !user) return;
+    try {
+        await updateDoc(doc(db, "users", user.uid), { nickname: newName });
+        setUser({...user, nickname: newName});
+        setIsEditingName(false);
+        showToast("Profile updated!", "success");
+        SoundSystem.play('SUCCESS');
+    } catch (error) {
+        console.error("Error updating profile:", error);
+        showToast("Failed to update profile", "error");
+        SoundSystem.play('ERROR');
+    }
   };
 
   // --- MODE SELECTION ---
@@ -380,14 +388,7 @@ export default function NurseCommanderPro() {
     setGameMode(mode);
     SoundSystem.play('CLICK');
     if (mode === 'RANKING') {
-      // Ranking Rules: 1 Shift (UPDATED), 4 Staff, 6 Beds
-      setConfig({
-        ...config,
-        bedCount: 6,
-        staffCount: 4,
-        targetShifts: 1, // [UPDATED] from 2 to 1
-        endlessMode: false
-      });
+      setConfig({ ...config, bedCount: 6, staffCount: 4, targetShifts: 1, endlessMode: false });
       setSubPhase('RANK_SETUP');
     } else {
       setSubPhase('NORMAL_SETUP');
@@ -395,14 +396,12 @@ export default function NurseCommanderPro() {
     setPhase('SETUP');
   };
 
-  // --- SOUND TOGGLE ---
   const toggleSound = () => {
     setSoundEnabled(!soundEnabled);
     SoundSystem.enabled = !soundEnabled;
     SoundSystem.init(); 
   };
 
-  // --- INITIALIZATION ---
   const initGame = () => {
     SoundSystem.init();
     SoundSystem.play('CLICK');
@@ -410,7 +409,6 @@ export default function NurseCommanderPro() {
     const newStaff = Array.from({ length: config.staffCount }, (_, i) => {
       let roleKey = i === 0 ? 'HEAD' : i === 1 ? 'RN' : i === config.staffCount - 1 ? 'PN' : 'JR';
       const role = STAFF_ROLES[roleKey];
-      
       const traitKeys = Object.keys(STAFF_TRAITS);
       const assignedTraits = [];
       const numTraits = role.traitCount;
@@ -481,17 +479,14 @@ export default function NurseCommanderPro() {
     };
   };
 
-  // --- MAIN GAME LOOP (UPDATED FREQUENCY) ---
   useEffect(() => {
     if (phase !== 'GAME') return;
 
     loopRef.current = setInterval(() => {
       if (gameSpeed === 0 || activeAlert || activeCall) return;
 
-      // 1. Time Advance
       setSimTime(prevTime => {
         const nextTime = prevTime + (6 * gameSpeed);
-        
         const startTime = 28800; // 08:00
         const elapsed = nextTime - startTime;
         const calculatedShift = Math.floor(elapsed / SHIFT_DURATION) + 1;
@@ -499,47 +494,28 @@ export default function NurseCommanderPro() {
         if (calculatedShift > shiftCount) {
             handleAutoShiftChange(calculatedShift);
         }
-
         return nextTime;
       });
 
-      // 2. Random Events Generator (INCREASED FREQUENCY)
       const rand = Math.random();
-      
-      // Increased admission chance: 0.0005 -> 0.002
       if (rand < 0.002 * gameSpeed && beds.some(b => b.status === 'EMPTY') && !activeCall) {
         const template = PATIENT_TEMPLATES[Math.floor(Math.random() * PATIENT_TEMPLATES.length)];
         setActiveCall({ type: 'ADMIT', data: template });
       }
-      
-      // Increased critical event chance: 0.0003 -> 0.001
-      if (rand < 0.001 * gameSpeed && !activeAlert) {
-          triggerCriticalEvent();
-      }
-      
-      // Significantly increased random task chance: 0.002 -> 0.015 (Very Busy)
-      if (rand < 0.015 * gameSpeed) {
-          addRandomTask();
-      }
-      
-      // Increased discharge chance: 0.0005 -> 0.0015
-      if (rand < 0.0015 * gameSpeed) {
-          addDischargeOrder();
-      }
+      if (rand < 0.001 * gameSpeed && !activeAlert) triggerCriticalEvent();
+      if (rand < 0.015 * gameSpeed) addRandomTask();
+      if (rand < 0.0015 * gameSpeed) addDischargeOrder();
 
-      // 3. Entity Updates
       updateBeds();
       updateStaff();
 
-    }, 50); // Tick rate
+    }, 50);
 
     return () => clearInterval(loopRef.current);
   }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount]);
 
-  // --- LOGIC: AUTO SHIFT CHANGE ---
   const handleAutoShiftChange = (newShiftVal) => {
     const shiftWages = staff.reduce((sum, s) => sum + s.shiftWage, 0);
-    
     setFinancials(prev => {
       const newCost = prev.cost + shiftWages;
       return { ...prev, cost: newCost, profit: prev.revenue - newCost };
@@ -554,7 +530,6 @@ export default function NurseCommanderPro() {
       const msg = `Shift ${newShiftVal} Started! Wages deducted: ${formatMoney(shiftWages)}`;
       showToast(msg, 'info');
       logTimeline(`Shift ${newShiftVal-1} ended. Wages paid. Shift ${newShiftVal} started.`, 'info');
-      
       setStaff(prev => prev.map(s => {
         const recovery = s.traits.includes('STAMINA') ? 50 : 30;
         return { ...s, stamina: Math.min(100, s.stamina + recovery) };
@@ -581,7 +556,6 @@ export default function NurseCommanderPro() {
       
       if (criticalTasks.length > 0) conditionDrop += 0.05 * gameSpeed;
       if (bed.status === 'CRITICAL') conditionDrop += 0.2;
-
       if (pendingTasks > 2) satChange -= 0.02 * gameSpeed; 
       if (bed.condition < 50) satChange -= 0.01 * gameSpeed; 
       
@@ -600,28 +574,19 @@ export default function NurseCommanderPro() {
 
       if (bed.nurseId && bed.nurseId.length > 0) {
         const nurses = staff.filter(s => bed.nurseId.includes(s.id));
-        
         let totalPower = 0;
-        
         nurses.forEach(n => {
            let power = n.skill * (n.stamina/100);
            power *= (1 + (n.level * 0.05));
-
            if (n.traits.includes('SPEED')) power *= 1.2;
            if (n.traits.includes('LAZY')) power *= 0.8;
            if (n.traits.includes('GRUMPY')) satChange -= 0.05 * gameSpeed;
            if (n.traits.includes('ANGEL')) satChange += 0.05 * gameSpeed;
-
            totalPower += power;
         });
-
-        if (nurses.some(n => n.traits.includes('MENTOR'))) {
-            totalPower *= 1.15; 
-        }
-
+        if (nurses.some(n => n.traits.includes('MENTOR'))) totalPower *= 1.15; 
         const step = (totalPower / 20) * 3 * gameSpeed;
         newProgress += step;
-
         if (newProgress >= 100) justCompleted = true;
       }
 
@@ -636,16 +601,13 @@ export default function NurseCommanderPro() {
       };
 
       if (justCompleted) handleTaskCompletion(updatedBed);
-      
       return justCompleted ? { ...updatedBed, actionProgress: 0, nurseId: [] } : updatedBed;
     }));
   };
 
   const handleTaskCompletion = (bed) => {
     const task = bed.tasks.find(t => t.status === 'PROCESSING');
-    if (task) {
-      completeTaskLogic(task, bed);
-    }
+    if (task) completeTaskLogic(task, bed);
   };
 
   const updateStaff = () => {
@@ -655,7 +617,6 @@ export default function NurseCommanderPro() {
         let drainRate = 0.05;
         if (s.traits.includes('STAMINA')) drainRate *= 0.7; 
         if (s.traits.includes('LAZY')) drainRate *= 1.2; 
-        
         staminaChange = -(drainRate * gameSpeed);
       } else {
         staminaChange = 0.1 * gameSpeed; 
@@ -663,8 +624,6 @@ export default function NurseCommanderPro() {
       return { ...s, stamina: Math.max(0, Math.min(100, s.stamina + staminaChange)) };
     }));
   };
-
-  // --- ACTIONS ---
 
   const assignTask = (nurseId, bedId, task) => {
     SoundSystem.play('CLICK');
@@ -698,7 +657,6 @@ export default function NurseCommanderPro() {
   const completeTaskLogic = (task, bed) => {
     const workerIds = bed.nurseId;
     const nurses = staff.filter(s => workerIds.includes(s.id));
-
     let isSuccess = true;
     nurses.forEach(n => {
         if (n.traits.includes('CLUMSY') && Math.random() < 0.05) {
@@ -712,23 +670,18 @@ export default function NurseCommanderPro() {
     if (!isSuccess) {
         setStaff(prev => prev.map(s => workerIds.includes(s.id) ? { ...s, status: 'IDLE', action: null, targetBedId: null } : s));
         setBeds(prev => prev.map(b => b.id === bed.id ? { 
-            ...b, 
-            nurseId: [], 
-            tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PENDING' } : t),
+            ...b, nurseId: [], tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PENDING' } : t),
             satisfaction: Math.max(0, b.satisfaction - 10) 
         } : b));
         return; 
     }
 
     setFinancials(prev => ({
-      ...prev,
-      revenue: prev.revenue + task.price,
-      cost: prev.cost + task.cost,
+      ...prev, revenue: prev.revenue + task.price, cost: prev.cost + task.cost,
       profit: (prev.revenue + task.price) - (prev.cost + task.cost)
     }));
     
     SoundSystem.play('SUCCESS');
-
     let satBonus = 5; 
     nurses.forEach(n => {
         if (n.traits.includes('ANGEL')) satBonus += 10;
@@ -744,7 +697,6 @@ export default function NurseCommanderPro() {
     }
 
     setScore(s => s + 10);
-
     const xpBase = task.xp || 10;
     const xpGain = xpBase;
 
@@ -754,26 +706,12 @@ export default function NurseCommanderPro() {
         let newLevel = s.level;
         let newMaxXp = s.maxXp;
         let newSkill = s.skill;
-
         if (newXp >= newMaxXp) {
-           newLevel += 1;
-           newXp = newXp - newMaxXp;
-           newMaxXp = Math.floor(newMaxXp * 1.5);
-           newSkill += 1;
+           newLevel += 1; newXp = newXp - newMaxXp; newMaxXp = Math.floor(newMaxXp * 1.5); newSkill += 1;
            showToast(`${s.name} Leveled Up to ${newLevel}!`, 'success');
            SoundSystem.play('LEVELUP');
         }
-
-        return { 
-          ...s, 
-          status: 'IDLE', 
-          action: null, 
-          targetBedId: null,
-          xp: newXp,
-          level: newLevel,
-          maxXp: newMaxXp,
-          skill: newSkill
-        };
+        return { ...s, status: 'IDLE', action: null, targetBedId: null, xp: newXp, level: newLevel, maxXp: newMaxXp, skill: newSkill };
       }
       return s;
     }));
@@ -782,16 +720,12 @@ export default function NurseCommanderPro() {
       if (b.id === bed.id) {
          if (task.id === 'DC') return { id: b.id, status: 'EMPTY', name: 'ว่าง', tasks: [] };
          return {
-           ...b,
-           nurseId: [],
-           tasks: b.tasks.filter(t => t.uid !== task.uid),
-           satisfaction: projectedSat,
-           complaints: updatedComplaints
+           ...b, nurseId: [], tasks: b.tasks.filter(t => t.uid !== task.uid),
+           satisfaction: projectedSat, complaints: updatedComplaints
          };
       }
       return b;
     }));
-    
     logTimeline(`${task.label} on ${bed.name} completed.`, 'good');
   };
 
@@ -800,14 +734,7 @@ export default function NurseCommanderPro() {
     if (validBeds.length === 0) return;
     const target = validBeds[Math.floor(Math.random() * validBeds.length)];
     const event = CRITICAL_EVENTS[Math.floor(Math.random() * CRITICAL_EVENTS.length)];
-    
-    setActiveAlert({
-      ...event,
-      bedId: target.id,
-      bedName: target.name,
-      shuffledOptions: shuffleArray(event.options)
-    });
-
+    setActiveAlert({ ...event, bedId: target.id, bedName: target.name, shuffledOptions: shuffleArray(event.options) });
     setBeds(prev => prev.map(b => b.id === target.id ? { ...b, status: 'CRITICAL', satisfaction: b.satisfaction - 20 } : b));
     SoundSystem.play('ALARM');
   };
@@ -815,37 +742,24 @@ export default function NurseCommanderPro() {
   const resolveCritical = (choice) => {
     SoundSystem.play('CLICK');
     const isCorrect = choice === activeAlert.correctAction;
-    
     if (isCorrect) {
       const idleStaff = staff.filter(s => s.status === 'IDLE');
       let staffIds = [];
-
       const hasClutch = idleStaff.some(s => s.traits.includes('CLUTCH'));
-      
       let req = activeAlert.reqStaff;
       if (hasClutch && req > 1) req -= 1; 
-
       if (idleStaff.length < req) {
          showToast(`Emergency Draft! Need ${req} staff`, 'warning');
          staffIds = idleStaff.map(s => s.id);
       } else {
          staffIds = idleStaff.slice(0, req).map(s => s.id);
       }
-
-      setStaff(prev => prev.map(s => staffIds.includes(s.id) ? {
-        ...s, status: 'CPR', action: 'CODE BLUE', targetBedId: activeAlert.bedId
-      } : s));
-
+      setStaff(prev => prev.map(s => staffIds.includes(s.id) ? { ...s, status: 'CPR', action: 'CODE BLUE', targetBedId: activeAlert.bedId } : s));
       const cprTask = TASKS_DB.find(t => t.id === 'CPR');
       setBeds(prev => prev.map(b => b.id === activeAlert.bedId ? {
-        ...b,
-        status: 'OCCUPIED',
-        nurseId: staffIds,
-        tasks: [{ ...cprTask, uid: Math.random(), status: 'PROCESSING' }, ...b.tasks],
-        condition: 50,
-        satisfaction: 50 
+        ...b, status: 'OCCUPIED', nurseId: staffIds, tasks: [{ ...cprTask, uid: Math.random(), status: 'PROCESSING' }, ...b.tasks],
+        condition: 50, satisfaction: 50 
       } : b));
-
       showToast(`Correct! Team mobilized. ${hasClutch ? '(Clutch Bonus Applied!)' : ''}`, 'success');
       logTimeline(`Code Blue managed on Bed ${activeAlert.bedId}`, 'good');
     } else {
@@ -864,12 +778,9 @@ export default function NurseCommanderPro() {
       if (occupied.length === 0) return prev;
       const target = occupied[Math.floor(Math.random() * occupied.length)];
       const task = TASKS_DB[Math.floor(Math.random() * (TASKS_DB.length - 2))];
-      
       if (target.tasks.some(t => t.id === task.id)) return prev;
-
       return prev.map(b => b.id === target.id ? {
-        ...b,
-        tasks: [...b.tasks, { ...task, uid: Math.random(), status: 'PENDING' }]
+        ...b, tasks: [...b.tasks, { ...task, uid: Math.random(), status: 'PENDING' }]
       } : b);
     });
   };
@@ -880,10 +791,8 @@ export default function NurseCommanderPro() {
       if (occupied.length === 0) return prev;
       const target = occupied[Math.floor(Math.random() * occupied.length)];
       const task = TASKS_DB.find(t => t.id === 'DC');
-      
       return prev.map(b => b.id === target.id ? {
-        ...b,
-        tasks: [...b.tasks, { ...task, uid: Math.random(), status: 'PENDING' }]
+        ...b, tasks: [...b.tasks, { ...task, uid: Math.random(), status: 'PENDING' }]
       } : b);
     });
     logTimeline('Doctor ordered discharge.', 'info');
@@ -895,20 +804,11 @@ export default function NurseCommanderPro() {
         const emptyBed = beds.find(b => b.status === 'EMPTY');
         if (emptyBed) {
            const newPatient = {
-             ...activeCall.data,
-             id: emptyBed.id,
-             status: 'OCCUPIED',
-             name: `Pt. ${Math.floor(Math.random()*1000)}`,
-             hn: `${Math.floor(Math.random()*50000)}`,
-             age: 40 + Math.floor(Math.random()*40),
+             ...activeCall.data, id: emptyBed.id, status: 'OCCUPIED', name: `Pt. ${Math.floor(Math.random()*1000)}`,
+             hn: `${Math.floor(Math.random()*50000)}`, age: 40 + Math.floor(Math.random()*40),
              currentVitals: activeCall.data.vitals,
              tasks: activeCall.data.orders.map(tid => ({ ...TASKS_DB.find(t=>t.id===tid), uid: Math.random(), status: 'PENDING' })),
-             nurseId: [],
-             actionProgress: 0,
-             condition: 100,
-             satisfaction: 60, 
-             complaints: [],
-             satTrend: 0
+             nurseId: [], actionProgress: 0, condition: 100, satisfaction: 60, complaints: [], satTrend: 0
            };
            setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
            setScore(s => s + 50);
@@ -927,16 +827,12 @@ export default function NurseCommanderPro() {
 
   const endGame = async (isVictory = false) => {
     setGameSpeed(0);
-
-    // Calculate XP if Ranking Mode
     let xpGained = 0;
     let rankUpdateMsg = '';
 
-    if (gameMode === 'RANKING' && isVictory) {
-        // XP Formula: Score * 2 + (Profit / 100)
+    if (gameMode === 'RANKING' && isVictory && user) {
         xpGained = Math.floor(score * 2 + (Math.max(0, financials.profit) / 100));
         
-        // Update User State
         const newUserState = {
             ...user,
             xp: user.xp + xpGained,
@@ -944,30 +840,35 @@ export default function NurseCommanderPro() {
             wins: isVictory ? user.wins + 1 : user.wins
         };
         setUser(newUserState);
-        localStorage.setItem('nurse_commander_save_v1', JSON.stringify(newUserState));
-        rankUpdateMsg = `Ranking XP Gained: +${xpGained}`;
-
-        // --- FIREBASE SAVE ---
+        
         try {
+            // Update User Profile
+            await setDoc(doc(db, "users", user.uid), newUserState);
+            
+            // Add to Leaderboard
             await addDoc(collection(db, "leaderboard"), {
                 name: user.nickname,
                 xp: newUserState.xp,
                 title: getRankData(newUserState.xp).title,
                 timestamp: serverTimestamp(),
                 score: score,
-                profit: financials.profit
+                profit: financials.profit,
+                uid: user.uid
             });
             console.log("Score saved to Firestore");
+            rankUpdateMsg = `Ranking XP Gained: +${xpGained}`;
         } catch (e) {
             console.error("Error adding document: ", e);
-            showToast("Offline Mode: Score saved locally only", "warning");
+            showToast("Connection Error: Score might not save", "warning");
         }
 
-    } else if (gameMode === 'RANKING' && !isVictory) {
-        xpGained = 10; // Consolation XP
+    } else if (gameMode === 'RANKING' && !isVictory && user) {
+        xpGained = 10;
         const newUserState = { ...user, matches: user.matches + 1, xp: user.xp + 10 };
         setUser(newUserState);
-        localStorage.setItem('nurse_commander_save_v1', JSON.stringify(newUserState));
+        try {
+             await setDoc(doc(db, "users", user.uid), newUserState);
+        } catch(e) {}
         rankUpdateMsg = `Failed! Consolation XP: +10`;
     }
 
@@ -985,7 +886,6 @@ export default function NurseCommanderPro() {
     if (isVictory) SoundSystem.play('LEVELUP');
   };
 
-  // --- UTILS ---
   const logTimeline = (text, type) => {
     const time = formatTime(simTime);
     setTimeline(prev => [{ time, text, type }, ...prev]);
@@ -1006,83 +906,114 @@ export default function NurseCommanderPro() {
     return s ? s.icon : '?';
   };
 
-  // ==========================================
-  // 4. UI RENDERERS
-  // ==========================================
-
   const renderLogin = () => (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="bg-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700">
+        <div className="bg-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700 relative">
             <div className="text-center mb-6">
                 <Heart size={48} className="text-red-500 mx-auto mb-2 animate-pulse" />
                 <h1 className="text-2xl font-black text-white">NURSE COMMANDER</h1>
-                <p className="text-slate-400">เข้าสู่ระบบเพื่อเริ่มงาน</p>
+                <p className="text-slate-400">Login to Sync Your Rank</p>
             </div>
-            <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                    <label className="block text-slate-300 text-sm font-bold mb-2">Email</label>
-                    <input ref={emailRef} type="email" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="nurse@hospital.com" />
-                </div>
-                <div>
-                    <label className="block text-slate-300 text-sm font-bold mb-2">ฉายา (Nickname)</label>
-                    <input ref={nicknameRef} type="text" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="น้องใหม่ไฟแรง" />
-                </div>
-                <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all">
-                    ลงชื่อเข้าใช้
-                </button>
-            </form>
+            
+            {authLoading ? (
+               <div className="text-center text-white py-10"><RefreshCw className="animate-spin mx-auto"/> Checking Session...</div>
+            ) : (
+                <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                        <label className="block text-slate-300 text-sm font-bold mb-2">Email</label>
+                        <input ref={emailRef} type="email" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="nurse@hospital.com" />
+                    </div>
+                    <div>
+                        <label className="block text-slate-300 text-sm font-bold mb-2">Password</label>
+                        <input ref={passwordRef} type="password" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="********" />
+                    </div>
+                    
+                    {isRegistering && (
+                       <div>
+                           <label className="block text-slate-300 text-sm font-bold mb-2">Nickname (ฉายา)</label>
+                           <input ref={nicknameRef} type="text" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="น้องใหม่ไฟแรง" />
+                       </div>
+                    )}
+
+                    <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-blue-500/50">
+                        {isRegistering ? 'Register & Start' : 'Login'}
+                    </button>
+                    
+                    <div className="text-center mt-4">
+                        <button type="button" onClick={() => setIsRegistering(!isRegistering)} className="text-sm text-slate-400 hover:text-white underline">
+                            {isRegistering ? 'Already have an account? Login' : 'New here? Create Account'}
+                        </button>
+                    </div>
+                </form>
+            )}
         </div>
     </div>
   );
 
   const renderMainMenu = () => {
-    const rank = getRankData(user.xp);
+    const rank = user ? getRankData(user.xp) : RANK_TITLES[0];
     const RankIcon = rank.icon;
     
     return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
-       {/* Background */}
        <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
          <div className="absolute top-10 left-10"><Heart size={100} className="text-white"/></div>
          <div className="absolute bottom-20 right-20"><Activity size={150} className="text-blue-500"/></div>
        </div>
 
        <div className="bg-slate-800 p-8 rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-700 z-10 grid grid-cols-1 md:grid-cols-2 gap-8">
-          
-          {/* Left: User Profile Summary */}
           <div className="flex flex-col items-center justify-center text-center p-6 bg-slate-900/50 rounded-2xl border border-slate-600">
              <div className="relative">
                 <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center mb-4 border-4 border-slate-700 shadow-xl">
                    <UserCircle size={60} className="text-white" />
                 </div>
                 <div className="absolute -bottom-2 -right-2 bg-yellow-400 text-black font-bold px-2 py-1 rounded-full text-xs border border-white">
-                    Lv.{Math.floor(user.xp / 1000) + 1}
+                    Lv.{user ? Math.floor(user.xp / 1000) + 1 : 1}
                 </div>
              </div>
              
-             <h2 className="text-2xl font-bold text-white mb-1">{user.nickname}</h2>
+             {isEditingName ? (
+                <div className="flex items-center gap-2 justify-center mb-1">
+                    <input 
+                        type="text" 
+                        value={newName} 
+                        onChange={(e) => setNewName(e.target.value)}
+                        className="bg-slate-700 text-white px-2 py-1 rounded border border-slate-500 w-32 text-center"
+                        placeholder="New Name"
+                    />
+                    <button onClick={saveProfile} className="p-1 bg-green-500 rounded hover:bg-green-400"><Save size={16} className="text-white"/></button>
+                    <button onClick={() => setIsEditingName(false)} className="p-1 bg-red-500 rounded hover:bg-red-400"><X size={16} className="text-white"/></button>
+                </div>
+             ) : (
+                <div className="flex items-center gap-2 justify-center mb-1 group">
+                    <h2 className="text-2xl font-bold text-white">{user ? user.nickname : 'Loading...'}</h2>
+                    <button onClick={() => { setNewName(user.nickname); setIsEditingName(true); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-white" title="Edit Name">
+                        <Edit size={16}/>
+                    </button>
+                </div>
+             )}
+
              <div className={`flex items-center gap-1 ${rank.color} font-bold mb-4`}>
                 <RankIcon size={16} /> {rank.title}
              </div>
 
              <div className="w-full bg-slate-700 rounded-full h-2 mb-2">
-                 <div className="bg-yellow-400 h-full rounded-full" style={{width: `${(user.xp % 1000) / 10}%`}}></div>
+                 <div className="bg-yellow-400 h-full rounded-full" style={{width: `${user ? (user.xp % 1000) / 10 : 0}%`}}></div>
              </div>
-             <p className="text-xs text-slate-400 mb-6">{user.xp} XP (Total)</p>
+             <p className="text-xs text-slate-400 mb-6">{user ? user.xp : 0} XP (Total)</p>
 
              <div className="grid grid-cols-2 gap-4 w-full">
                 <div className="bg-slate-800 p-3 rounded-xl border border-slate-600">
                     <div className="text-xs text-slate-400">Matches</div>
-                    <div className="text-xl font-bold text-white">{user.matches}</div>
+                    <div className="text-xl font-bold text-white">{user ? user.matches : 0}</div>
                 </div>
                 <div className="bg-slate-800 p-3 rounded-xl border border-slate-600">
                     <div className="text-xs text-slate-400">Wins</div>
-                    <div className="text-xl font-bold text-green-400">{user.wins}</div>
+                    <div className="text-xl font-bold text-green-400">{user ? user.wins : 0}</div>
                 </div>
              </div>
           </div>
 
-          {/* Right: Menu Actions */}
           <div className="flex flex-col justify-center space-y-4">
              <h1 className="text-4xl font-black text-white mb-2 text-center md:text-left">NURSE <span className="text-blue-500">COMMANDER</span> PRO</h1>
              <p className="text-slate-400 text-sm mb-6 text-center md:text-left">ยินดีต้อนรับกลับมาทำงาน กรุณาเลือกโหมดที่ต้องการ</p>
@@ -1142,14 +1073,13 @@ export default function NurseCommanderPro() {
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                    {/* Data fetched from Firebase or Mock if empty */}
                     {leaderboardData.length === 0 ? (
                          <tr><td colSpan="4" className="p-4 text-center text-slate-500">Loading or No Data...</td></tr>
                     ) : (
                         leaderboardData
                         .sort((a,b) => b.xp - a.xp)
                         .map((p, index) => {
-                            const isMe = p.name === user.nickname;
+                            const isMe = user && p.name === user.nickname;
                             return (
                                 <tr key={index} className={isMe ? "bg-blue-50 border-l-4 border-blue-500" : "hover:bg-slate-50"}>
                                     <td className="p-4 font-mono font-bold text-slate-400">#{index + 1}</td>
@@ -1177,7 +1107,6 @@ export default function NurseCommanderPro() {
     return (
       <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
         <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-          {/* Header */}
           <div className="bg-slate-800 text-white p-4 flex justify-between items-center shrink-0">
              <div className="flex items-center gap-4">
                 <div className={`p-2 rounded-lg font-bold ${triageColor} border-2 border-white`}>{selectedBed.triage} ZONE</div>
@@ -1190,14 +1119,11 @@ export default function NurseCommanderPro() {
           </div>
 
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-             {/* Left Column */}
              <div className="w-full md:w-1/3 bg-slate-50 border-r p-4 overflow-y-auto shrink-0 h-1/3 md:h-full">
                 <div className="mb-6">
                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Diagnosis</h3>
                    <div className="text-lg md:text-xl font-bold text-slate-800">{selectedBed.dx}</div>
                 </div>
-
-                {/* SATISFACTION PANEL */}
                 <div className="mb-6 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Patient Satisfaction</h3>
                     <div className="flex items-center gap-3 mb-2">
@@ -1209,22 +1135,17 @@ export default function NurseCommanderPro() {
                     <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-3">
                          <div className={`h-full ${selectedBed.satisfaction > 70 ? 'bg-green-500' : selectedBed.satisfaction > 30 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{width: `${selectedBed.satisfaction}%`}}></div>
                     </div>
-                    
-                    {/* Complaints List */}
                     {selectedBed.complaints.length > 0 ? (
                         <div className="space-y-2">
                              <div className="text-xs font-bold text-red-500 uppercase flex items-center gap-1"><ShieldAlert size={12}/> Active Complaints</div>
                              {selectedBed.complaints.map((c, i) => (
-                                 <div key={i} className="bg-red-50 text-red-700 p-2 rounded text-xs border border-red-200 flex items-center gap-2">
-                                      <ThumbsDown size={14}/> {c.text} (-{c.penalty} pts)
-                                 </div>
+                                 <div key={i} className="bg-red-50 text-red-700 p-2 rounded text-xs border border-red-200 flex items-center gap-2"><ThumbsDown size={14}/> {c.text} (-{c.penalty} pts)</div>
                              ))}
                         </div>
                     ) : (
                         <div className="text-xs text-green-600 flex items-center gap-1"><ThumbsUp size={12}/> No active complaints</div>
                     )}
                 </div>
-
                 <div className="mb-6">
                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Live Vitals</h3>
                    <div className="grid grid-cols-2 gap-3">
@@ -1248,20 +1169,14 @@ export default function NurseCommanderPro() {
                 </div>
              </div>
 
-             {/* Right Column */}
              <div className="flex-1 bg-white p-4 overflow-y-auto h-2/3 md:h-full">
-                <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                  <ClipboardList/> Doctor Orders
-                </h3>
-                
+                <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><ClipboardList/> Doctor Orders</h3>
                 <div className="space-y-3 pb-20 md:pb-0">
                   {selectedBed.tasks.map(task => (
                     <div key={task.uid} className={`border rounded-xl p-4 transition-all ${task.status === 'PROCESSING' ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
                       <div className="flex justify-between items-start mb-2">
                           <div>
-                             <span className={`text-xs font-bold px-2 py-0.5 rounded text-white mr-2 ${task.type === 'CRITICAL' ? 'bg-red-600' : task.type === 'SKILLED' ? 'bg-purple-600' : 'bg-blue-600'}`}>
-                               {task.type}
-                             </span>
+                             <span className={`text-xs font-bold px-2 py-0.5 rounded text-white mr-2 ${task.type === 'CRITICAL' ? 'bg-red-600' : task.type === 'SKILLED' ? 'bg-purple-600' : 'bg-blue-600'}`}>{task.type}</span>
                              <span className="font-bold">{task.label}</span>
                           </div>
                           <div className="text-right ml-2">
@@ -1278,22 +1193,12 @@ export default function NurseCommanderPro() {
                                   const canDo = task.role.includes(s.roleKey);
                                   const isFree = s.status === 'IDLE';
                                   return (
-                                    <button
-                                      key={s.id}
-                                      disabled={!isFree}
-                                      onClick={() => assignTask(s.id, selectedBed.id, task)}
-                                      className={`px-3 py-2 rounded border flex items-center gap-2 ${!canDo ? 'opacity-30 cursor-not-allowed bg-slate-100' : isFree ? 'hover:bg-blue-100 border-slate-300 hover:border-blue-500' : 'opacity-50 bg-slate-100'}`}
-                                    >
+                                    <button key={s.id} disabled={!isFree} onClick={() => assignTask(s.id, selectedBed.id, task)}
+                                      className={`px-3 py-2 rounded border flex items-center gap-2 ${!canDo ? 'opacity-30 cursor-not-allowed bg-slate-100' : isFree ? 'hover:bg-blue-100 border-slate-300 hover:border-blue-500' : 'opacity-50 bg-slate-100'}`}>
                                         <span className="text-lg">{s.icon}</span>
                                         <div className="text-left">
                                            <div className="text-xs font-bold">{s.name}</div>
                                            <div className={`text-[9px] ${s.stamina < 30 ? 'text-red-500' : 'text-green-500'}`}>{Math.round(s.stamina)}% En</div>
-                                        </div>
-                                        <div className="flex gap-0.5 ml-1">
-                                           {s.traits.map(tKey => {
-                                                const T = STAFF_TRAITS[tKey];
-                                                return <div key={tKey} title={T.name} className={`w-2 h-2 rounded-full ${T.type === 'POS' ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                                           })}
                                         </div>
                                         <div className="bg-yellow-100 text-yellow-700 text-[8px] px-1 rounded font-bold ml-1">Lv.{s.level}</div>
                                     </button>
@@ -1303,9 +1208,7 @@ export default function NurseCommanderPro() {
                         </div>
                       )}
                       {task.status === 'PROCESSING' && (
-                        <div className="text-blue-600 text-sm font-bold flex items-center gap-2 animate-pulse">
-                           <RefreshCw size={14} className="animate-spin"/> In Progress by {selectedBed.nurseId.map(nid => getStaffName(nid)).join(', ')}
-                        </div>
+                        <div className="text-blue-600 text-sm font-bold flex items-center gap-2 animate-pulse"><RefreshCw size={14} className="animate-spin"/> In Progress by {selectedBed.nurseId.map(nid => getStaffName(nid)).join(', ')}</div>
                       )}
                     </div>
                   ))}
@@ -1324,10 +1227,7 @@ export default function NurseCommanderPro() {
       <div className="fixed inset-0 z-[60] bg-red-900/90 flex items-center justify-center p-4 animate-in zoom-in duration-300">
         <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border-l-8 border-red-600 overflow-hidden">
            <div className="bg-red-50 p-6 border-b border-red-100">
-              <div className="flex items-center gap-3 mb-2">
-                 <AlertOctagon className="text-red-600 animate-pulse" size={32}/>
-                 <h2 className="text-2xl font-black text-red-700">CRITICAL EVENT</h2>
-              </div>
+              <div className="flex items-center gap-3 mb-2"><AlertOctagon className="text-red-600 animate-pulse" size={32}/><h2 className="text-2xl font-black text-red-700">CRITICAL EVENT</h2></div>
               <p className="font-bold text-slate-800 text-lg">Bed: {activeAlert.bedName} - {activeAlert.title}</p>
            </div>
            <div className="p-6">
@@ -1338,13 +1238,7 @@ export default function NurseCommanderPro() {
               </div>
               <div className="grid grid-cols-1 gap-3">
                  {activeAlert.shuffledOptions.map((opt, i) => (
-                    <button 
-                      key={i} 
-                      onClick={() => resolveCritical(opt)}
-                      className="p-4 text-left border-2 border-slate-200 rounded-xl hover:bg-slate-50 hover:border-blue-500 font-bold text-slate-700 transition-all"
-                    >
-                      {i+1}. {opt}
-                    </button>
+                    <button key={i} onClick={() => resolveCritical(opt)} className="p-4 text-left border-2 border-slate-200 rounded-xl hover:bg-slate-50 hover:border-blue-500 font-bold text-slate-700 transition-all">{i+1}. {opt}</button>
                  ))}
               </div>
            </div>
@@ -1358,20 +1252,14 @@ export default function NurseCommanderPro() {
     const { data } = activeCall;
     return (
       <div className="fixed bottom-20 md:bottom-4 left-4 right-4 md:left-auto md:right-4 z-[70] w-auto md:w-96 bg-slate-800 text-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up border border-slate-600">
-         <div className="p-4 bg-blue-600 flex items-center gap-3">
-            <PhoneCall className="animate-phone"/>
-            <div className="font-bold">Incoming Admission</div>
-         </div>
+         <div className="p-4 bg-blue-600 flex items-center gap-3"><PhoneCall className="animate-phone"/><div className="font-bold">Incoming Admission</div></div>
          <div className="p-4">
             <div className="flex justify-between items-start mb-4">
                <div>
                   <div className="text-lg font-bold">{data.dx}</div>
                   <div className={`inline-block px-2 rounded text-xs font-bold text-slate-900 ${data.triage==='RED'?'bg-red-400':data.triage==='YELLOW'?'bg-yellow-400':'bg-green-400'}`}>{data.triage} TRIAGE</div>
                </div>
-               <div className="text-right text-sm opacity-70">
-                  <div>HR: {data.vitals.hr}</div>
-                  <div>BP: {data.vitals.bp_sys}</div>
-               </div>
+               <div className="text-right text-sm opacity-70"><div>HR: {data.vitals.hr}</div><div>BP: {data.vitals.bp_sys}</div></div>
             </div>
             <div className="grid grid-cols-2 gap-2">
                <button onClick={() => admitPatient('ACCEPT')} className="bg-green-600 hover:bg-green-500 py-2 rounded-lg font-bold">Accept</button>
@@ -1388,72 +1276,45 @@ export default function NurseCommanderPro() {
      return (
         <div className="fixed inset-0 z-[100] bg-slate-900/90 flex items-center justify-center p-4 overflow-y-auto">
            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 md:p-8 text-center shadow-2xl animate-in zoom-in max-h-[90vh] overflow-y-auto">
-              {isWin ? (
-                 <Star size={80} className="mx-auto text-yellow-400 mb-4 fill-current animate-spin-slow"/>
-              ) : (
-                 <Flag size={80} className="mx-auto text-slate-400 mb-4"/>
-              )}
-              
+              {isWin ? <Star size={80} className="mx-auto text-yellow-400 mb-4 fill-current animate-spin-slow"/> : <Flag size={80} className="mx-auto text-slate-400 mb-4"/>}
               <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-2">{isWin ? 'MISSION ACCOMPLISHED' : 'GAME FINISHED'}</h1>
               <p className="text-slate-500 mb-6">{isWin ? 'You successfully managed the ward.' : 'You ended the simulation.'}</p>
               
-              {/* RANK UPDATE IF RANKED MODE */}
               {gameMode === 'RANKING' && endGameReport.xpGained > 0 && (
                   <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl text-white shadow-lg transform scale-105">
                       <div className="text-sm font-bold opacity-80 uppercase tracking-widest mb-1">RANKING UPDATE</div>
                       <div className="text-3xl font-black">{endGameReport.rankUpdateMsg}</div>
-                      <div className="flex items-center justify-center gap-2 mt-2">
-                          <Crown size={16}/> {getRankData(user.xp).title}
-                      </div>
+                      <div className="flex items-center justify-center gap-2 mt-2"><Crown size={16}/> {user ? getRankData(user.xp).title : ''}</div>
                   </div>
               )}
 
-              {/* STATS GRID - Responsive Stack on Mobile */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-                 <div className="bg-blue-50 p-4 rounded-xl">
-                    <div className="text-sm text-slate-500">Total Score</div>
-                    <div className="text-3xl font-black text-blue-600">{endGameReport.score}</div>
-                 </div>
-                 <div className="bg-green-50 p-4 rounded-xl">
-                    <div className="text-sm text-slate-500">Net Profit</div>
-                    <div className="text-2xl md:text-3xl font-black text-green-600">{formatMoney(endGameReport.profit)}</div>
-                 </div>
-                 <div className="bg-purple-50 p-4 rounded-xl">
-                    <div className="text-sm text-slate-500">Shifts</div>
-                    <div className="text-3xl font-black text-purple-600">
-                       {endGameReport.shifts} / {endGameReport.endlessMode ? '∞' : endGameReport.targetShifts}
-                    </div>
-                 </div>
+                 <div className="bg-blue-50 p-4 rounded-xl"><div className="text-sm text-slate-500">Total Score</div><div className="text-3xl font-black text-blue-600">{endGameReport.score}</div></div>
+                 <div className="bg-green-50 p-4 rounded-xl"><div className="text-sm text-slate-500">Net Profit</div><div className="text-2xl md:text-3xl font-black text-green-600">{formatMoney(endGameReport.profit)}</div></div>
+                 <div className="bg-purple-50 p-4 rounded-xl"><div className="text-sm text-slate-500">Shifts</div><div className="text-3xl font-black text-purple-600">{endGameReport.shifts} / {endGameReport.endlessMode ? '∞' : endGameReport.targetShifts}</div></div>
               </div>
 
               <div className="max-h-48 overflow-y-auto bg-slate-50 p-4 rounded-xl mb-6 text-left border">
                  <h3 className="font-bold text-slate-500 mb-2 sticky top-0 bg-slate-50 pb-2">Shift History</h3>
-                 {endGameReport.timeline.map((log, i) => (
-                    <div key={i} className="text-xs font-mono mb-1 border-b border-slate-200 pb-1">{log.time} - {log.text}</div>
-                 ))}
+                 {endGameReport.timeline.map((log, i) => (<div key={i} className="text-xs font-mono mb-1 border-b border-slate-200 pb-1">{log.time} - {log.text}</div>))}
               </div>
               
               <div className="flex flex-col sm:flex-row gap-3">
-                <button onClick={() => window.location.reload()} className="flex-1 bg-slate-800 text-white px-6 py-3 rounded-full font-bold text-lg hover:bg-slate-700 transition-all shadow-xl">
-                    Play Again
-                </button>
-                <button onClick={() => { setPhase('MENU'); setEndGameReport(null); setBeds([]); setStaff([]); }} className="flex-1 bg-white text-slate-800 border-2 border-slate-800 px-6 py-3 rounded-full font-bold text-lg hover:bg-slate-100 transition-all shadow-xl">
-                    Main Menu
-                </button>
+                <button onClick={() => window.location.reload()} className="flex-1 bg-slate-800 text-white px-6 py-3 rounded-full font-bold text-lg hover:bg-slate-700 transition-all shadow-xl">Play Again</button>
+                <button onClick={() => { setPhase('MENU'); setEndGameReport(null); setBeds([]); setStaff([]); }} className="flex-1 bg-white text-slate-800 border-2 border-slate-800 px-6 py-3 rounded-full font-bold text-lg hover:bg-slate-100 transition-all shadow-xl">Main Menu</button>
               </div>
            </div>
         </div>
      );
   };
 
-  // --- START SCREEN (SETUP) ---
+  if (phase === 'LOADING') return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white"><RefreshCw className="animate-spin mr-2"/> Loading System...</div>;
   if (phase === 'LOGIN') return renderLogin();
   if (phase === 'MENU') return renderMainMenu();
   if (phase === 'LEADERBOARD') return renderLeaderboard();
 
   if (phase === 'SETUP') return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans text-white relative overflow-hidden">
-       {/* Decorative Background */}
        <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
          <div className="absolute top-10 left-10"><Heart size={100}/></div>
          <div className="absolute bottom-20 right-20"><Activity size={150}/></div>
@@ -1470,9 +1331,7 @@ export default function NurseCommanderPro() {
                  SETUP: <span className={gameMode === 'RANKING' ? "text-yellow-400" : "text-blue-500"}>{gameMode === 'RANKING' ? 'RANKING MODE' : 'NORMAL MODE'}</span>
              </h1>
              <p className="text-slate-400 text-sm md:text-base">
-                {gameMode === 'RANKING' 
-                  ? 'Locked Settings: 1 Shift, 4 Staff, 6 Beds. Choose your ward wisely.' 
-                  : 'Customize your simulation parameters freely.'}
+                {gameMode === 'RANKING' ? 'Locked Settings: 1 Shift, 4 Staff, 6 Beds. Choose your ward wisely.' : 'Customize your simulation parameters freely.'}
              </p>
           </div>
 
@@ -1485,10 +1344,7 @@ export default function NurseCommanderPro() {
                       return (
                          <button key={key} onClick={() => setConfig({...config, ward: key})} 
                             className={`p-3 rounded-xl border-2 text-left transition-all flex flex-col h-full ${config.ward === key ? 'bg-slate-700 border-blue-500 ring-2 ring-blue-500/50' : 'border-slate-600 hover:bg-slate-700'}`}>
-                            <div className="flex items-center gap-3 mb-2">
-                               <div className={`p-2 rounded-lg ${W.color} text-white shrink-0`}><W.Icon size={18}/></div>
-                               <span className="font-bold truncate">{W.name}</span>
-                            </div>
+                            <div className="flex items-center gap-3 mb-2"><div className={`p-2 rounded-lg ${W.color} text-white shrink-0`}><W.Icon size={18}/></div><span className="font-bold truncate">{W.name}</span></div>
                             <div className="text-[10px] text-slate-400 text-ellipsis overflow-hidden">{W.desc}</div>
                          </button>
                       )
@@ -1499,34 +1355,12 @@ export default function NurseCommanderPro() {
              <div className="flex flex-col justify-center space-y-6 bg-slate-900/50 p-6 rounded-2xl border border-slate-700">
                 {gameMode === 'NORMAL' ? (
                     <>
-                        <div>
-                            <div className="flex justify-between mb-2"><span className="font-bold text-slate-300">Staff Count</span> <span className="text-blue-400 font-mono">{config.staffCount}</span></div>
-                            <input type="range" min="3" max="8" value={config.staffCount} onChange={(e)=>setConfig({...config, staffCount: Number(e.target.value)})} className="w-full accent-blue-500"/>
-                        </div>
-                        <div>
-                            <div className="flex justify-between mb-2"><span className="font-bold text-slate-300">Total Beds</span> <span className="text-green-400 font-mono">{config.bedCount}</span></div>
-                            <input type="range" min="4" max="12" value={config.bedCount} onChange={(e)=>setConfig({...config, bedCount: Number(e.target.value)})} className="w-full accent-green-500"/>
-                        </div>
+                        <div><div className="flex justify-between mb-2"><span className="font-bold text-slate-300">Staff Count</span> <span className="text-blue-400 font-mono">{config.staffCount}</span></div><input type="range" min="3" max="8" value={config.staffCount} onChange={(e)=>setConfig({...config, staffCount: Number(e.target.value)})} className="w-full accent-blue-500"/></div>
+                        <div><div className="flex justify-between mb-2"><span className="font-bold text-slate-300">Total Beds</span> <span className="text-green-400 font-mono">{config.bedCount}</span></div><input type="range" min="4" max="12" value={config.bedCount} onChange={(e)=>setConfig({...config, bedCount: Number(e.target.value)})} className="w-full accent-green-500"/></div>
                         <div className="bg-slate-800 p-4 rounded-xl border border-slate-600">
-                            <div className="flex justify-between mb-2 items-center">
-                                <span className="font-bold text-yellow-400">Target Duration</span>
-                                <div className="flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        id="endlessMode" 
-                                        className="w-4 h-4 mr-2 accent-yellow-500"
-                                        checked={config.endlessMode}
-                                        onChange={(e) => setConfig({...config, endlessMode: e.target.checked})}
-                                    />
-                                    <label htmlFor="endlessMode" className="text-xs text-white cursor-pointer select-none">Endless Mode</label>
-                                </div>
-                            </div>
-                            
+                            <div className="flex justify-between mb-2 items-center"><span className="font-bold text-yellow-400">Target Duration</span><div className="flex items-center"><input type="checkbox" id="endlessMode" className="w-4 h-4 mr-2 accent-yellow-500" checked={config.endlessMode} onChange={(e) => setConfig({...config, endlessMode: e.target.checked})}/><label htmlFor="endlessMode" className="text-xs text-white cursor-pointer select-none">Endless Mode</label></div></div>
                             {config.endlessMode ? (
-                                <div className="text-center py-4 bg-slate-700 rounded-lg border border-slate-600 animate-pulse">
-                                    <span className="text-2xl font-bold text-yellow-400 flex items-center justify-center gap-2"><Infinity/> UNLIMITED SHIFTS</span>
-                                    <div className="text-xs text-slate-400 mt-1">Game continues until you stop</div>
-                                </div>
+                                <div className="text-center py-4 bg-slate-700 rounded-lg border border-slate-600 animate-pulse"><span className="text-2xl font-bold text-yellow-400 flex items-center justify-center gap-2"><Infinity/> UNLIMITED SHIFTS</span><div className="text-xs text-slate-400 mt-1">Game continues until you stop</div></div>
                             ) : (
                                 <>
                                     <div className="flex justify-between mb-1"><span className="text-xs">Shifts</span> <span className="text-yellow-400 font-mono text-xl font-bold">{config.targetShifts}</span></div>
@@ -1537,7 +1371,6 @@ export default function NurseCommanderPro() {
                         </div>
                     </>
                 ) : (
-                    // RANKING MODE LOCKED DISPLAY
                     <div className="space-y-4">
                         <div className="bg-yellow-900/20 p-4 rounded-xl border border-yellow-600/50">
                             <h4 className="text-yellow-400 font-bold mb-2 flex items-center gap-2"><Trophy size={16}/> OFFICIAL RANKING MATCH</h4>
@@ -1550,10 +1383,7 @@ export default function NurseCommanderPro() {
                         </div>
                     </div>
                 )}
-
-                <button onClick={initGame} className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-black text-xl shadow-lg transform transition-all hover:scale-105 flex items-center justify-center gap-2">
-                   START {gameMode === 'RANKING' ? 'RANKED MATCH' : 'GAME'} <Play fill="currentColor"/>
-                </button>
+                <button onClick={initGame} className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-black text-xl shadow-lg transform transition-all hover:scale-105 flex items-center justify-center gap-2">START {gameMode === 'RANKING' ? 'RANKED MATCH' : 'GAME'} <Play fill="currentColor"/></button>
              </div>
           </div>
        </div>
@@ -1577,160 +1407,69 @@ export default function NurseCommanderPro() {
       {renderPhoneCall()}
       {renderEndGame()}
 
-      {/* TOP HEADER */}
       <div className={`h-16 ${WardConfig.color} text-white flex items-center justify-between px-4 shadow-lg z-40 shrink-0`}>
          <div className="flex items-center gap-3">
             <div className="bg-white/20 p-2 rounded-lg"><WardIcon/></div>
             <div>
                <h1 className="font-bold text-lg leading-none truncate max-w-[150px] md:max-w-none">{WardConfig.name} Ward</h1>
-               <div className="text-[10px] opacity-80 flex gap-2">
-                  <span>{gameMode === 'RANKING' ? '🏆 RANKED' : '🕹️ NORMAL'}</span>
-                  <span>|</span>
-                  <span>Target: {config.endlessMode ? <span className="font-bold">∞</span> : config.targetShifts} Shifts</span>
-               </div>
+               <div className="text-[10px] opacity-80 flex gap-2"><span>{gameMode === 'RANKING' ? '🏆 RANKED' : '🕹️ NORMAL'}</span><span>|</span><span>Target: {config.endlessMode ? <span className="font-bold">∞</span> : config.targetShifts} Shifts</span></div>
             </div>
          </div>
 
-         {/* Stats Bar (Desktop) */}
          <div className="hidden md:flex gap-6 items-center bg-black/20 px-4 py-2 rounded-xl border border-white/10">
-            <div className="flex items-center gap-2 text-yellow-400">
-               <Star fill="currentColor" size={16}/>
-               <span className="font-mono font-bold text-lg">{score}</span>
-            </div>
+            <div className="flex items-center gap-2 text-yellow-400"><Star fill="currentColor" size={16}/><span className="font-mono font-bold text-lg">{score}</span></div>
             <div className="w-px h-6 bg-white/20"></div>
-            <div className="flex items-center gap-2 text-green-400">
-               <Banknote size={16}/>
-               <div className="flex flex-col leading-none">
-                  <span className="text-[10px] text-green-200">PROFIT</span>
-                  <span className="font-mono font-bold">{formatMoney(financials.profit)}</span>
-               </div>
-            </div>
+            <div className="flex items-center gap-2 text-green-400"><Banknote size={16}/><div className="flex flex-col leading-none"><span className="text-[10px] text-green-200">PROFIT</span><span className="font-mono font-bold">{formatMoney(financials.profit)}</span></div></div>
             <div className="w-px h-6 bg-white/20"></div>
-            <div className="flex items-center gap-2 text-white">
-               <Calendar size={16}/>
-               <div className="flex flex-col leading-none text-right">
-                  <span className="text-[10px] text-white/70">SHIFT</span>
-                  <span className="font-mono font-bold">{shiftCount} / {config.endlessMode ? '∞' : config.targetShifts}</span>
-               </div>
-            </div>
+            <div className="flex items-center gap-2 text-white"><Calendar size={16}/><div className="flex flex-col leading-none text-right"><span className="text-[10px] text-white/70">SHIFT</span><span className="font-mono font-bold">{shiftCount} / {config.endlessMode ? '∞' : config.targetShifts}</span></div></div>
             <div className="w-px h-6 bg-white/20"></div>
-            <div className="flex items-center gap-2 text-white">
-               <Clock size={16}/>
-               <span className="font-mono font-bold text-lg">{formatTime(simTime)}</span>
-            </div>
+            <div className="flex items-center gap-2 text-white"><Clock size={16}/><span className="font-mono font-bold text-lg">{formatTime(simTime)}</span></div>
          </div>
 
          <div className="flex items-center gap-2">
-            <div className="md:hidden font-mono font-bold text-white text-sm mr-2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
-               <Clock size={12}/> {formatTime(simTime)}
-            </div>
-
-            <button onClick={toggleSound} className={`p-2 rounded-full transition-all ${soundEnabled ? 'bg-white/20 text-white' : 'bg-red-500/20 text-red-300'}`}>
-                {soundEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}
-            </button>
-            <button onClick={() => setGameSpeed(s => s === 0 ? 1 : 0)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-all">
-               {gameSpeed === 0 ? <Play fill="currentColor"/> : <Pause fill="currentColor"/>}
-            </button>
-            <button onClick={() => endGame(false)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg transition-all flex flex-col items-center leading-none">
-               <Flag size={14} className="mb-0.5"/> FINISH
-            </button>
+            <div className="md:hidden font-mono font-bold text-white text-sm mr-2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded"><Clock size={12}/> {formatTime(simTime)}</div>
+            <button onClick={toggleSound} className={`p-2 rounded-full transition-all ${soundEnabled ? 'bg-white/20 text-white' : 'bg-red-500/20 text-red-300'}`}>{soundEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button>
+            <button onClick={() => setGameSpeed(s => s === 0 ? 1 : 0)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-all">{gameSpeed === 0 ? <Play fill="currentColor"/> : <Pause fill="currentColor"/>}</button>
+            <button onClick={() => endGame(false)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg transition-all flex flex-col items-center leading-none"><Flag size={14} className="mb-0.5"/> FINISH</button>
          </div>
       </div>
 
-      {/* MAIN CONTENT GRID */}
       <div className="flex-1 flex overflow-hidden">
-         {/* LEFT: WARD VIEW */}
          <div className={`flex-1 bg-slate-200 p-4 overflow-y-auto ${mobileTab==='STAFF' ? 'hidden md:block' : 'block'}`}>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20">
                {beds.map(bed => {
                   const isEmpty = bed.status === 'EMPTY';
                   const isCrit = bed.status === 'CRITICAL';
                   const isDead = bed.status === 'DEAD';
-                  
                   let borderClass = 'border-slate-300';
                   if (!isEmpty && !isDead) {
                       if (bed.triage === 'RED') borderClass = 'triage-red';
                       if (bed.triage === 'YELLOW') borderClass = 'triage-yellow';
                       if (bed.triage === 'GREEN') borderClass = 'triage-green';
                   }
-
                   return (
                      <div key={bed.id} onClick={() => !isEmpty && !isDead && setSelectedBed(bed)}
-                        className={`
-                           relative h-64 rounded-xl p-3 flex flex-col shadow-sm transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 bg-white
-                           ${borderClass}
-                           ${isCrit ? 'ring-4 ring-red-500 animate-pulse' : ''}
-                           ${isDead ? 'opacity-50 grayscale' : ''}
-                           ${isEmpty ? 'opacity-60 border-dashed border-4 border-slate-300' : ''}
-                           ${bed.complaints && bed.complaints.length > 0 ? 'shake-element' : ''}
-                        `}
-                     >
+                        className={`relative h-64 rounded-xl p-3 flex flex-col shadow-sm transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 bg-white ${borderClass} ${isCrit ? 'ring-4 ring-red-500 animate-pulse' : ''} ${isDead ? 'opacity-50 grayscale' : ''} ${isEmpty ? 'opacity-60 border-dashed border-4 border-slate-300' : ''} ${bed.complaints && bed.complaints.length > 0 ? 'shake-element' : ''}`}>
                         {isEmpty ? (
-                           <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                              <UserPlus size={40}/>
-                              <span className="font-bold mt-2">VACANT</span>
-                           </div>
+                           <div className="flex flex-col items-center justify-center h-full text-slate-400"><UserPlus size={40}/><span className="font-bold mt-2">VACANT</span></div>
                         ) : isDead ? (
-                           <div className="flex flex-col items-center justify-center h-full text-slate-600">
-                              <Skull size={40}/>
-                              <span className="font-bold mt-2">DECEASED</span>
-                           </div>
+                           <div className="flex flex-col items-center justify-center h-full text-slate-600"><Skull size={40}/><span className="font-bold mt-2">DECEASED</span></div>
                         ) : (
                            <>
-                              <div className="flex justify-between items-start mb-2">
-                                 <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span>
-                                 <div className="flex gap-1">
-                                    {isCrit && <AlertTriangle size={16} className="text-red-600"/>}
-                                    {bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}
-                                 </div>
-                              </div>
-                              
-                              <div className="bg-black rounded h-12 mb-2 relative overflow-hidden border border-slate-700 flex items-center px-2">
-                                 <div className="absolute inset-0 opacity-20 ecg-line"></div>
-                                 <div className="relative z-10 w-full flex justify-between font-mono text-green-400 text-[10px] md:text-xs">
-                                    <div className="flex flex-col">
-                                       <span>HR {Math.round(bed.currentVitals.hr)}</span>
-                                       <span>BP {Math.round(bed.currentVitals.bp_sys)}</span>
-                                    </div>
-                                    <div className="flex flex-col items-end">
-                                       <span>O2 {Math.round(bed.currentVitals.spo2)}%</span>
-                                       <span>T {bed.currentVitals.temp.toFixed(1)}</span>
-                                    </div>
-                                 </div>
-                              </div>
-
+                              <div className="flex justify-between items-start mb-2"><span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span><div className="flex gap-1">{isCrit && <AlertTriangle size={16} className="text-red-600"/>}{bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}</div></div>
+                              <div className="bg-black rounded h-12 mb-2 relative overflow-hidden border border-slate-700 flex items-center px-2"><div className="absolute inset-0 opacity-20 ecg-line"></div><div className="relative z-10 w-full flex justify-between font-mono text-green-400 text-[10px] md:text-xs"><div className="flex flex-col"><span>HR {Math.round(bed.currentVitals.hr)}</span><span>BP {Math.round(bed.currentVitals.bp_sys)}</span></div><div className="flex flex-col items-end"><span>O2 {Math.round(bed.currentVitals.spo2)}%</span><span>T {bed.currentVitals.temp.toFixed(1)}</span></div></div></div>
                               <div className="font-bold text-sm truncate text-slate-800">{bed.name}</div>
                               <div className="text-xs text-slate-500 truncate mb-1">{bed.dx}</div>
-
-                              <div className="mb-2">
-                                 <div className="flex justify-between items-center text-[9px] mb-0.5 font-bold">
-                                    <span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>SATISFACTION</span>
-                                    <span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>{Math.round(bed.satisfaction)}%</span>
-                                 </div>
-                                 <div className="h-1 bg-slate-100 w-full rounded-full overflow-hidden">
-                                    <div className={`h-full transition-all duration-500 ${bed.satisfaction < 30 ? 'bg-red-500' : bed.satisfaction < 70 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${bed.satisfaction}%`}}></div>
-                                 </div>
-                              </div>
-
+                              <div className="mb-2"><div className="flex justify-between items-center text-[9px] mb-0.5 font-bold"><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>SATISFACTION</span><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>{Math.round(bed.satisfaction)}%</span></div><div className="h-1 bg-slate-100 w-full rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${bed.satisfaction < 30 ? 'bg-red-500' : bed.satisfaction < 70 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${bed.satisfaction}%`}}></div></div></div>
                               <div className="mt-auto">
                                  {bed.nurseId.length > 0 ? (
                                     <div className="w-full">
-                                       <div className="flex justify-between text-[10px] text-blue-600 font-bold mb-1 items-center">
-                                          <div className="flex items-center gap-1 overflow-hidden">
-                                             <RefreshCw size={10} className="animate-spin shrink-0"/>
-                                             <span className="truncate">{bed.nurseId.map(id => getStaffIcon(id)).join('')}</span>
-                                          </div>
-                                          <span>{Math.round(bed.actionProgress)}%</span>
-                                       </div>
-                                       <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
-                                          <div className="h-full bg-blue-500 transition-all duration-300" style={{width: `${bed.actionProgress}%`}}></div>
-                                       </div>
+                                       <div className="flex justify-between text-[10px] text-blue-600 font-bold mb-1 items-center"><div className="flex items-center gap-1 overflow-hidden"><RefreshCw size={10} className="animate-spin shrink-0"/><span className="truncate">{bed.nurseId.map(id => getStaffIcon(id)).join('')}</span></div><span>{Math.round(bed.actionProgress)}%</span></div>
+                                       <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-300" style={{width: `${bed.actionProgress}%`}}></div></div>
                                     </div>
                                  ) : (
                                     <div className="flex gap-1 flex-wrap">
-                                       {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (
-                                          <span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500':'bg-blue-400'}`}></span>
-                                       ))}
+                                       {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (<span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500':'bg-blue-400'}`}></span>))}
                                        {bed.tasks.length > 3 && <span className="text-[9px] text-slate-400">+{bed.tasks.length-3}</span>}
                                        {bed.tasks.length === 0 && <span className="text-[10px] text-green-500 font-bold flex items-center gap-1"><CheckCircle size={10}/> Stable</span>}
                                     </div>
@@ -1744,7 +1483,6 @@ export default function NurseCommanderPro() {
             </div>
          </div>
 
-         {/* RIGHT: STAFF & INFO */}
          <div className={`w-full md:w-96 bg-white border-l shadow-xl z-20 flex flex-col ${mobileTab==='STAFF'?'block':'hidden md:flex'}`}>
             <div className="p-3 bg-slate-50 border-b flex justify-between items-center shrink-0">
                <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2"><Users size={16}/> ON DUTY</h3>
@@ -1755,80 +1493,25 @@ export default function NurseCommanderPro() {
                   <div key={s.id} className={`border rounded-xl p-3 shadow-sm transition-all ${s.status === 'IDLE' ? 'bg-white border-slate-200' : s.status==='CPR' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
                      <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-2">
-                           <div className="text-xl bg-slate-100 p-1 rounded relative">
-                              {s.icon}
-                              <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">
-                                 {s.level}
-                              </div>
-                           </div>
-                           <div>
-                              <div className="font-bold text-sm text-slate-800 flex items-center gap-1">
-                                {s.name}
-                              </div>
-                              <div className="text-[10px] text-slate-500">{s.label}</div>
-                           </div>
+                           <div className="text-xl bg-slate-100 p-1 rounded relative">{s.icon}<div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">{s.level}</div></div>
+                           <div><div className="font-bold text-sm text-slate-800 flex items-center gap-1">{s.name}</div><div className="text-[10px] text-slate-500">{s.label}</div></div>
                         </div>
-                        <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='CPR'?'bg-red-600 text-white animate-pulse':'bg-blue-100 text-blue-700'}`}>
-                           {s.status}
-                        </div>
+                        <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='CPR'?'bg-red-600 text-white animate-pulse':'bg-blue-100 text-blue-700'}`}>{s.status}</div>
                      </div>
-
-                     <div className="mb-2">
-                         <div className="flex justify-between text-[8px] text-slate-400 mb-0.5">
-                            <span>EXP</span>
-                            <span>{Math.floor(s.xp)}/{s.maxXp}</span>
-                         </div>
-                         <div className="h-1 bg-slate-100 rounded-full w-full">
-                            <div className="h-full bg-yellow-400 rounded-full transition-all" style={{width: `${(s.xp/s.maxXp)*100}%`}}></div>
-                         </div>
-                     </div>
-                     
-                     <div className="mb-2 flex gap-1 flex-wrap">
-                        {s.traits.map(tKey => {
-                           const T = STAFF_TRAITS[tKey];
-                           const Icon = T.icon;
-                           return (
-                               <div key={tKey} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${T.type === 'POS' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={T.desc}>
-                                   <Icon size={10}/> {T.name}
-                               </div>
-                           )
-                        })}
-                     </div>
-
-                     <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                           <div className={`h-full transition-all duration-500 ${s.stamina < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${s.stamina}%`}}></div>
-                        </div>
-                        <span className="text-[9px] text-slate-400 font-mono">{Math.round(s.stamina)}%</span>
-                     </div>
-                     
-                     {s.targetBedId && (
-                        <div className="mt-2 text-xs flex items-center justify-between bg-white/50 p-1 rounded">
-                           <span className="text-slate-500 flex items-center gap-1">
-                              <ArrowRight size={10}/> Bed {s.targetBedId}
-                           </span>
-                           <span className="font-bold text-blue-600 truncate max-w-[100px]">{s.action}</span>
-                        </div>
-                     )}
+                     <div className="mb-2"><div className="flex justify-between text-[8px] text-slate-400 mb-0.5"><span>EXP</span><span>{Math.floor(s.xp)}/{s.maxXp}</span></div><div className="h-1 bg-slate-100 rounded-full w-full"><div className="h-full bg-yellow-400 rounded-full transition-all" style={{width: `${(s.xp/s.maxXp)*100}%`}}></div></div></div>
+                     <div className="mb-2 flex gap-1 flex-wrap">{s.traits.map(tKey => {const T = STAFF_TRAITS[tKey]; return (<div key={tKey} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${T.type === 'POS' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={T.desc}>{T.icon && <T.icon size={10}/>} {T.name}</div>)})}</div>
+                     <div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${s.stamina < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${s.stamina}%`}}></div></div><span className="text-[9px] text-slate-400 font-mono">{Math.round(s.stamina)}%</span></div>
+                     {s.targetBedId && (<div className="mt-2 text-xs flex items-center justify-between bg-white/50 p-1 rounded"><span className="text-slate-500 flex items-center gap-1"><ArrowRight size={10}/> Bed {s.targetBedId}</span><span className="font-bold text-blue-600 truncate max-w-[100px]">{s.action}</span></div>)}
                   </div>
                ))}
             </div>
-
             <div className="h-1/3 border-t bg-slate-900 text-slate-300 p-3 overflow-y-auto">
                <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-2"><History size={10}/> Event Log</h4>
-               <div className="space-y-1.5 font-mono text-[10px]">
-                  {timeline.map((log, i) => (
-                     <div key={i} className={`flex gap-2 ${log.type==='bad'?'text-red-400':log.type==='good'?'text-green-400':'text-slate-400'}`}>
-                        <span className="opacity-50">[{log.time}]</span>
-                        <span>{log.text}</span>
-                     </div>
-                  ))}
-               </div>
+               <div className="space-y-1.5 font-mono text-[10px]">{timeline.map((log, i) => (<div key={i} className={`flex gap-2 ${log.type==='bad'?'text-red-400':log.type==='good'?'text-green-400':'text-slate-400'}`}><span className="opacity-50">[{log.time}]</span><span>{log.text}</span></div>))}</div>
             </div>
          </div>
       </div>
 
-      {/* MOBILE NAV */}
       <div className="md:hidden bg-white border-t flex justify-between p-2 shrink-0">
          <button onClick={()=>setMobileTab('DASHBOARD')} className={`flex-1 p-2 rounded flex flex-col items-center ${mobileTab==='DASHBOARD'?'text-blue-600 bg-blue-50':''}`}><Layout size={20}/><span className="text-[10px]">Ward</span></button>
          <button onClick={()=>setMobileTab('STAFF')} className={`flex-1 p-2 rounded flex flex-col items-center ${mobileTab==='STAFF'?'text-blue-600 bg-blue-50':''}`}><Users size={20}/><span className="text-[10px]">Staff</span></button>
