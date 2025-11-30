@@ -9,6 +9,7 @@
     "firebase": "^10.7.1",
     "lucide-react": "^0.263.1",
     "web-vitals": "^2.1.4"
+    "chart.js": "^4.4.1"
   },
   "scripts": {
     "start": "react-scripts start",
