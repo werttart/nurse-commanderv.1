@@ -12,7 +12,7 @@ import {
   Smile, Frown, Meh, Zap, Coffee, Shield, Ghost,
   ThumbsDown, ThumbsUp, Sparkles, Angry, Flame,
   Volume2, VolumeX, Trophy, Medal, Crown, UserCircle,
-  Edit, Save
+  Edit, Save, ShoppingBag
 } from 'lucide-react';
 // Firebase Imports
 import { initializeApp } from "firebase/app";
@@ -151,6 +151,12 @@ const STAFF_ROLES = {
   PN:   { label: 'PN/NA', skill: 4, scope: 'BASIC', maxLoad: 12, wage: 500, icon: '🤝', traitCount: 1 }
 };
 
+const SHOP_ITEMS = [
+    { id: 'SPEED', name: 'High-Tech Equipment', icon: Zap, desc: 'Staff work 10% faster per level', baseCost: 2000, costMult: 1.5, maxLv: 5 },
+    { id: 'COMFORT', name: 'Luxury Beds', icon: Smile, desc: 'Patients lose satisfaction slower', baseCost: 3000, costMult: 1.5, maxLv: 5 },
+    { id: 'RECOVERY', name: 'Premium Coffee Machine', icon: Coffee, desc: 'Staff recover +10% more stamina per shift', baseCost: 1500, costMult: 1.5, maxLv: 5 }
+];
+
 const TASKS_DB = [
   { id: 'VS', label: 'V/S & Neuro Signs', type: 'BASIC', cost: 5, price: 50, duration: 15, role: ['PN', 'JR', 'RN', 'HEAD'], xp: 5 },
   { id: 'CARE', label: 'Bed Bath / Turning', type: 'BASIC', cost: 20, price: 100, duration: 30, role: ['PN', 'JR', 'RN', 'HEAD'], xp: 15 },
@@ -261,13 +267,21 @@ export default function NurseCommanderPro() {
   const [timeline, setTimeline] = useState([]);
    
   // --- INTERACTION STATE ---
-  const [selectedBed, setSelectedBed] = useState(null);
+  const [selectedBedId, setSelectedBedId] = useState(null); // Changed to ID to prevent stale state
   const [activeAlert, setActiveAlert] = useState(null);
   const [notification, setNotification] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
   const [endGameReport, setEndGameReport] = useState(null);
   const [mobileTab, setMobileTab] = useState('DASHBOARD');
   const [leaderboardData, setLeaderboardData] = useState([]);
+  
+  // --- UPGRADES STATE ---
+  const [wardUpgrades, setWardUpgrades] = useState({ SPEED: 0, COMFORT: 0, RECOVERY: 0 });
+  const [showShop, setShowShop] = useState(false);
+
+  // Lock refs for anti-spam
+  const isAdmittingRef = useRef(false);
+  const isResolvingRef = useRef(false);
 
   // Login/Register Refs
   const emailRef = useRef(null);
@@ -277,6 +291,9 @@ export default function NurseCommanderPro() {
 
   const loopRef = useRef(null);
   const SHIFT_DURATION = 8 * 3600;
+
+  // Derived State for Selected Bed (Fresh Data)
+  const selectedBed = selectedBedId ? beds.find(b => b.id === selectedBedId) : null;
 
   // --- AUTH CHECK ---
   useEffect(() => {
@@ -468,6 +485,11 @@ export default function NurseCommanderPro() {
     SoundSystem.init();
     SoundSystem.play('CLICK');
 
+    // Reset Upgrades on New Game (Optional: Keep them for endless feeling? Let's reset for balance)
+    if(gameMode === 'RANKING') {
+        setWardUpgrades({ SPEED: 0, COMFORT: 0, RECOVERY: 0 });
+    }
+    
     const newStaff = Array.from({ length: config.staffCount }, (_, i) => {
       let roleKey = i === 0 ? 'HEAD' : i === 1 ? 'RN' : i === config.staffCount - 1 ? 'PN' : 'JR';
       const role = STAFF_ROLES[roleKey];
@@ -514,6 +536,23 @@ export default function NurseCommanderPro() {
     setSimTime(28800);
     setTimeline([{ time: '08:00', text: `Shift 1 Started. Mode: ${gameMode}`, type: 'INFO' }]);
     setPhase('GAME');
+  };
+
+  const buyUpgrade = (itemId) => {
+      const item = SHOP_ITEMS.find(i => i.id === itemId);
+      const currentLv = wardUpgrades[itemId];
+      if (currentLv >= item.maxLv) return;
+
+      const cost = Math.floor(item.baseCost * Math.pow(item.costMult, currentLv));
+      if (financials.profit >= cost) {
+          setFinancials(prev => ({ ...prev, profit: prev.profit - cost }));
+          setWardUpgrades(prev => ({ ...prev, [itemId]: currentLv + 1 }));
+          SoundSystem.play('SUCCESS'); // Use Success sound as Ka-ching!
+          showToast(`Upgraded ${item.name} to Lv.${currentLv + 2}`, 'success');
+      } else {
+          SoundSystem.play('ERROR');
+          showToast('Not enough profit!', 'error');
+      }
   };
 
   const generatePatient = (bedId) => {
@@ -578,7 +617,7 @@ export default function NurseCommanderPro() {
     }, 100); // เปลี่ยนจาก 50 เป็น 100 ms
 
     return () => clearInterval(loopRef.current);
-  }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount]);
+  }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount, wardUpgrades]);
 
   const handleAutoShiftChange = (newShiftVal) => {
     const shiftWages = staff.reduce((sum, s) => sum + s.shiftWage, 0);
@@ -596,9 +635,14 @@ export default function NurseCommanderPro() {
       const msg = `Shift ${newShiftVal} Started! Wages deducted: ${formatMoney(shiftWages)}`;
       showToast(msg, 'info');
       logTimeline(`Shift ${newShiftVal-1} ended. Wages paid. Shift ${newShiftVal} started.`, 'info');
+      
+      // Apply Recovery Upgrade Logic
+      const recoveryBonus = 1 + (wardUpgrades.RECOVERY * 0.1); 
+      
       setStaff(prev => prev.map(s => {
-        const recovery = s.traits.includes('STAMINA') ? 50 : 30;
-        return { ...s, stamina: Math.min(100, s.stamina + recovery) };
+        const baseRecovery = s.traits.includes('STAMINA') ? 50 : 30;
+        const totalRecovery = Math.floor(baseRecovery * recoveryBonus);
+        return { ...s, stamina: Math.min(100, s.stamina + totalRecovery) };
       }));
     }
   };
@@ -625,6 +669,11 @@ export default function NurseCommanderPro() {
       if (bed.status === 'CRITICAL') conditionDrop += 0.4;
       if (pendingTasks > 2) satChange -= 0.04 * gameSpeed; 
       if (bed.condition < 50) satChange -= 0.02 * gameSpeed; 
+      
+      // Apply Comfort Upgrade Logic (Reduce satisfaction loss)
+      if (satChange < 0 && wardUpgrades.COMFORT > 0) {
+          satChange = satChange * (1 - (wardUpgrades.COMFORT * 0.1)); // Reduce loss by 10% per level
+      }
        
       let newComplaints = [...bed.complaints];
       if (bed.satisfaction < 30 && bed.complaints.length === 0 && Math.random() < 0.02) {
@@ -653,8 +702,11 @@ export default function NurseCommanderPro() {
         });
         if (nurses.some(n => n.traits.includes('MENTOR'))) totalPower *= 1.15; 
         
+        // Apply Speed Upgrade Logic
+        const speedMultiplier = 1 + (wardUpgrades.SPEED * 0.1);
+        
         // เพิ่มความเร็วในการทำงานเล็กน้อย (คูณ 6 แทน 3)
-        const step = (totalPower / 20) * 6 * gameSpeed;
+        const step = (totalPower / 20) * 6 * gameSpeed * speedMultiplier;
         newProgress += step;
         if (newProgress >= 100) justCompleted = true;
       }
@@ -696,107 +748,119 @@ export default function NurseCommanderPro() {
   };
 
   const assignTask = (nurseId, bedId, task) => {
-    SoundSystem.play('CLICK');
-    const nurse = staff.find(n => n.id === nurseId);
-    if (nurse.status !== 'IDLE') return showToast('Staff not available', 'error');
-    if (!task.role.includes(nurse.roleKey)) {
-       setScore(s => s - 50); 
-       showToast(`Wrong Role! ${nurse.roleKey} cannot do ${task.label}`, 'error');
-       SoundSystem.play('ERROR');
-       return;
+    try {
+        SoundSystem.play('CLICK');
+        const nurse = staff.find(n => n.id === nurseId);
+        
+        // SAFETY CHECK: Check if nurse exists
+        if (!nurse) return;
+
+        if (nurse.status !== 'IDLE') return showToast('Staff not available', 'error');
+        if (!task.role.includes(nurse.roleKey)) {
+           setScore(s => s - 50); 
+           showToast(`Wrong Role! ${nurse.roleKey} cannot do ${task.label}`, 'error');
+           SoundSystem.play('ERROR');
+           return;
+        }
+        if (nurse.stamina < 10) return showToast('Staff exhausted!', 'error');
+
+        setStaff(prev => prev.map(n => n.id === nurseId ? {
+          ...n, status: 'WORKING', action: task.label, targetBedId: bedId
+        } : n));
+
+        setBeds(prev => prev.map(b => {
+          if (b.id === bedId) {
+            return {
+              ...b,
+              nurseId: [...b.nurseId, nurseId],
+              tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PROCESSING' } : t)
+            };
+          }
+          return b;
+        }));
+        setSelectedBedId(null);
+    } catch (e) {
+        console.error("Assign Task Error:", e);
     }
-    if (nurse.stamina < 10) return showToast('Staff exhausted!', 'error');
-
-    setStaff(prev => prev.map(n => n.id === nurseId ? {
-      ...n, status: 'WORKING', action: task.label, targetBedId: bedId
-    } : n));
-
-    setBeds(prev => prev.map(b => {
-      if (b.id === bedId) {
-        return {
-          ...b,
-          nurseId: [...b.nurseId, nurseId],
-          tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PROCESSING' } : t)
-        };
-      }
-      return b;
-    }));
-    setSelectedBed(null);
   };
 
   const completeTaskLogic = (task, bed) => {
-    const workerIds = bed.nurseId;
-    const nurses = staff.filter(s => workerIds.includes(s.id));
-    let isSuccess = true;
-    nurses.forEach(n => {
-        if (n.traits.includes('CLUMSY') && Math.random() < 0.05) {
-            isSuccess = false;
-            showToast(`${n.name} was clumsy! Task failed.`, 'error');
-            logTimeline(`${n.name} failed ${task.label} due to clumsiness.`, 'bad');
-            SoundSystem.play('ERROR');
+    try {
+        const workerIds = bed.nurseId;
+        const nurses = staff.filter(s => workerIds.includes(s.id));
+        let isSuccess = true;
+        nurses.forEach(n => {
+            if (n.traits.includes('CLUMSY') && Math.random() < 0.05) {
+                isSuccess = false;
+                showToast(`${n.name} was clumsy! Task failed.`, 'error');
+                logTimeline(`${n.name} failed ${task.label} due to clumsiness.`, 'bad');
+                SoundSystem.play('ERROR');
+            }
+        });
+
+        if (!isSuccess) {
+            setStaff(prev => prev.map(s => workerIds.includes(s.id) ? { ...s, status: 'IDLE', action: null, targetBedId: null } : s));
+            setBeds(prev => prev.map(b => b.id === bed.id ? { 
+                ...b, nurseId: [], tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PENDING' } : t),
+                satisfaction: Math.max(0, b.satisfaction - 10) 
+            } : b));
+            return; 
         }
-    });
 
-    if (!isSuccess) {
-        setStaff(prev => prev.map(s => workerIds.includes(s.id) ? { ...s, status: 'IDLE', action: null, targetBedId: null } : s));
-        setBeds(prev => prev.map(b => b.id === bed.id ? { 
-            ...b, nurseId: [], tasks: b.tasks.map(t => t.uid === task.uid ? { ...t, status: 'PENDING' } : t),
-            satisfaction: Math.max(0, b.satisfaction - 10) 
-        } : b));
-        return; 
-    }
-
-    setFinancials(prev => ({
-      ...prev, revenue: prev.revenue + task.price, cost: prev.cost + task.cost,
-      profit: (prev.revenue + task.price) - (prev.cost + task.cost)
-    }));
-    
-    SoundSystem.play('SUCCESS');
-    let satBonus = 5; 
-    nurses.forEach(n => {
-        if (n.traits.includes('ANGEL')) satBonus += 10;
-        if (n.traits.includes('GRUMPY')) satBonus -= 3;
-    });
-
-    let updatedComplaints = [...bed.complaints];
-    const projectedSat = Math.min(100, bed.satisfaction + satBonus);
-    if (projectedSat > 60 && updatedComplaints.length > 0) {
-        updatedComplaints.pop(); 
-        showToast('A complaint was resolved!', 'success');
+        setFinancials(prev => ({
+          ...prev, revenue: prev.revenue + task.price, cost: prev.cost + task.cost,
+          profit: (prev.revenue + task.price) - (prev.cost + task.cost)
+        }));
+        
         SoundSystem.play('SUCCESS');
-    }
+        let satBonus = 5; 
+        nurses.forEach(n => {
+            if (n.traits.includes('ANGEL')) satBonus += 10;
+            if (n.traits.includes('GRUMPY')) satBonus -= 3;
+        });
 
-    setScore(s => s + 10);
-    const xpBase = task.xp || 10;
-    const xpGain = xpBase;
-
-    setStaff(prev => prev.map(s => {
-      if (workerIds.includes(s.id)) {
-        let newXp = s.xp + xpGain;
-        let newLevel = s.level;
-        let newMaxXp = s.maxXp;
-        let newSkill = s.skill;
-        if (newXp >= newMaxXp) {
-           newLevel += 1; newXp = newXp - newMaxXp; newMaxXp = Math.floor(newMaxXp * 1.5); newSkill += 1;
-           showToast(`${s.name} Leveled Up to ${newLevel}!`, 'success');
-           SoundSystem.play('LEVELUP');
+        let updatedComplaints = [...bed.complaints];
+        const projectedSat = Math.min(100, bed.satisfaction + satBonus);
+        if (projectedSat > 60 && updatedComplaints.length > 0) {
+            updatedComplaints.pop(); 
+            showToast('A complaint was resolved!', 'success');
+            SoundSystem.play('SUCCESS');
         }
-        return { ...s, status: 'IDLE', action: null, targetBedId: null, xp: newXp, level: newLevel, maxXp: newMaxXp, skill: newSkill };
-      }
-      return s;
-    }));
 
-    setBeds(prev => prev.map(b => {
-      if (b.id === bed.id) {
-         if (task.id === 'DC') return { id: b.id, status: 'EMPTY', name: 'ว่าง', tasks: [] };
-         return {
-           ...b, nurseId: [], tasks: b.tasks.filter(t => t.uid !== task.uid),
-           satisfaction: projectedSat, complaints: updatedComplaints
-         };
-      }
-      return b;
-    }));
-    logTimeline(`${task.label} on ${bed.name} completed.`, 'good');
+        setScore(s => s + 10);
+        const xpBase = task.xp || 10;
+        const xpGain = xpBase;
+
+        setStaff(prev => prev.map(s => {
+          if (workerIds.includes(s.id)) {
+            let newXp = s.xp + xpGain;
+            let newLevel = s.level;
+            let newMaxXp = s.maxXp;
+            let newSkill = s.skill;
+            if (newXp >= newMaxXp) {
+               newLevel += 1; newXp = newXp - newMaxXp; newMaxXp = Math.floor(newMaxXp * 1.5); newSkill += 1;
+               showToast(`${s.name} Leveled Up to ${newLevel}!`, 'success');
+               SoundSystem.play('LEVELUP');
+            }
+            return { ...s, status: 'IDLE', action: null, targetBedId: null, xp: newXp, level: newLevel, maxXp: newMaxXp, skill: newSkill };
+          }
+          return s;
+        }));
+
+        setBeds(prev => prev.map(b => {
+          if (b.id === bed.id) {
+             if (task.id === 'DC') return { id: b.id, status: 'EMPTY', name: 'ว่าง', tasks: [] };
+             return {
+               ...b, nurseId: [], tasks: b.tasks.filter(t => t.uid !== task.uid),
+               satisfaction: projectedSat, complaints: updatedComplaints
+             };
+          }
+          return b;
+        }));
+        logTimeline(`${task.label} on ${bed.name} completed.`, 'good');
+    } catch (e) {
+        console.error("Task Logic Error:", e);
+    }
   };
 
   const triggerCriticalEvent = () => {
@@ -810,36 +874,47 @@ export default function NurseCommanderPro() {
   };
 
   const resolveCritical = (choice) => {
-    SoundSystem.play('CLICK');
-    const isCorrect = choice === activeAlert.correctAction;
-    if (isCorrect) {
-      const idleStaff = staff.filter(s => s.status === 'IDLE');
-      let staffIds = [];
-      const hasClutch = idleStaff.some(s => s.traits.includes('CLUTCH'));
-      let req = activeAlert.reqStaff;
-      if (hasClutch && req > 1) req -= 1; 
-      if (idleStaff.length < req) {
-         showToast(`Emergency Draft! Need ${req} staff`, 'warning');
-         staffIds = idleStaff.map(s => s.id);
-      } else {
-         staffIds = idleStaff.slice(0, req).map(s => s.id);
-      }
-      setStaff(prev => prev.map(s => staffIds.includes(s.id) ? { ...s, status: 'CPR', action: 'CODE BLUE', targetBedId: activeAlert.bedId } : s));
-      const cprTask = TASKS_DB.find(t => t.id === 'CPR');
-      setBeds(prev => prev.map(b => b.id === activeAlert.bedId ? {
-        ...b, status: 'OCCUPIED', nurseId: staffIds, tasks: [{ ...cprTask, uid: Math.random(), status: 'PROCESSING' }, ...b.tasks],
-        condition: 50, satisfaction: 50 
-      } : b));
-      showToast(`Correct! Team mobilized. ${hasClutch ? '(Clutch Bonus Applied!)' : ''}`, 'success');
-      logTimeline(`Code Blue managed on Bed ${activeAlert.bedId}`, 'good');
-    } else {
-      setScore(s => s - 200);
-      setBeds(prev => prev.map(b => b.id === activeAlert.bedId ? { ...b, condition: 0, status: 'DEAD', nurseId: [] } : b));
-      showToast('Wrong Decision! Patient Expired.', 'error');
-      logTimeline(`Patient died due to error on Bed ${activeAlert.bedId}`, 'bad');
-      SoundSystem.play('ERROR');
+    // ANTI-SPAM LOCK
+    if (isResolvingRef.current) return;
+    isResolvingRef.current = true;
+
+    try {
+        SoundSystem.play('CLICK');
+        const isCorrect = choice === activeAlert.correctAction;
+        if (isCorrect) {
+          const idleStaff = staff.filter(s => s.status === 'IDLE');
+          let staffIds = [];
+          const hasClutch = idleStaff.some(s => s.traits.includes('CLUTCH'));
+          let req = activeAlert.reqStaff;
+          if (hasClutch && req > 1) req -= 1; 
+          if (idleStaff.length < req) {
+             showToast(`Emergency Draft! Need ${req} staff`, 'warning');
+             staffIds = idleStaff.map(s => s.id);
+          } else {
+             staffIds = idleStaff.slice(0, req).map(s => s.id);
+          }
+          setStaff(prev => prev.map(s => staffIds.includes(s.id) ? { ...s, status: 'CPR', action: 'CODE BLUE', targetBedId: activeAlert.bedId } : s));
+          const cprTask = TASKS_DB.find(t => t.id === 'CPR');
+          setBeds(prev => prev.map(b => b.id === activeAlert.bedId ? {
+            ...b, status: 'OCCUPIED', nurseId: staffIds, tasks: [{ ...cprTask, uid: Math.random(), status: 'PROCESSING' }, ...b.tasks],
+            condition: 50, satisfaction: 50 
+          } : b));
+          showToast(`Correct! Team mobilized. ${hasClutch ? '(Clutch Bonus Applied!)' : ''}`, 'success');
+          logTimeline(`Code Blue managed on Bed ${activeAlert.bedId}`, 'good');
+        } else {
+          setScore(s => s - 200);
+          setBeds(prev => prev.map(b => b.id === activeAlert.bedId ? { ...b, condition: 0, status: 'DEAD', nurseId: [] } : b));
+          showToast('Wrong Decision! Patient Expired.', 'error');
+          logTimeline(`Patient died due to error on Bed ${activeAlert.bedId}`, 'bad');
+          SoundSystem.play('ERROR');
+        }
+    } catch(e) {
+        console.error("Critical Resolve Error", e);
+    } finally {
+        setActiveAlert(null);
+        // Unlock after delay to prevent double tapping
+        setTimeout(() => { isResolvingRef.current = false; }, 500);
     }
-    setActiveAlert(null);
   };
 
   const addRandomTask = () => {
@@ -868,83 +943,101 @@ export default function NurseCommanderPro() {
     logTimeline('Doctor ordered discharge.', 'info');
   };
 
-  // --- UPDATED: Admit with Triage Logic ---
+  // --- UPDATED: Admit with Triage Logic & Anti-Spam ---
   const admitPatient = (decision, selectedTriage = null) => {
-     SoundSystem.play('CLICK');
-     if (decision === 'ACCEPT' && selectedTriage) {
-        const emptyBed = beds.find(b => b.status === 'EMPTY');
-        if (emptyBed) {
-           const actualTriage = activeCall.data.triage;
-           let initSat = 60;
-           let initCondition = 100;
-           let xpBonus = 0;
-           let msg = "";
-           let type = "success";
-
-           // Triage Logic Check
-           if (selectedTriage === actualTriage) {
-               // Correct
-               xpBonus = 50;
-               initSat = 80;
-               msg = `Correct Triage! (+${xpBonus} XP) Patient is stable.`;
-               SoundSystem.play('SUCCESS');
-           } else if (
-               (actualTriage === 'RED' && selectedTriage !== 'RED') || 
-               (actualTriage === 'YELLOW' && selectedTriage === 'GREEN')
-           ) {
-               // Under-triage (Dangerous)
-               initCondition = 50; // Patient deteriorates immediately
-               initSat = 40;
-               msg = `⚠ UNDER-TRIAGE! Patient condition Critical!`;
-               type = "error";
-               SoundSystem.play('ALARM');
-           } else {
-               // Over-triage (Wasteful)
-               msg = "Over-triage. Safe but resources wasted.";
-               type = "info";
-           }
-
-           const newPatient = {
-             ...activeCall.data, 
-             id: emptyBed.id, 
-             status: 'OCCUPIED', 
-             name: `Pt. ${Math.floor(Math.random()*1000)}`,
-             hn: `${Math.floor(Math.random()*50000)}`, 
-             age: 40 + Math.floor(Math.random()*40),
-             currentVitals: activeCall.data.vitals,
-             tasks: activeCall.data.orders.map(tid => {
-                 // Safety Fallback: ป้องกัน Task หายแล้วเกมพัง
-                 const t = TASKS_DB.find(x => x.id === tid) || TASKS_DB[0];
-                 return { ...t, uid: Math.random(), status: 'PENDING' };
-             }),
-             nurseId: [], 
-             actionProgress: 0, 
-             condition: initCondition, 
-             satisfaction: initSat, 
-             complaints: [], 
-             satTrend: 0 
-           };
-           
-           setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
-           setScore(s => s + 50 + xpBonus);
-           if(user && xpBonus > 0) {
-               // Instant XP update for fun with Safety Check
-               setUser(prev => {
-                   if(!prev) return null; // ป้องกัน Crash ถ้า User State ไม่พร้อม
-                   return {...prev, xp: prev.xp + xpBonus};
-               });
-           }
-           
-           showToast(msg, type);
-        } else {
-           showToast('No beds available!', 'error');
-           SoundSystem.play('ERROR');
-           setScore(s => s - 10);
-        }
-     } else {
-        logTimeline('Refused Admission', 'neutral');
+     // ANTI-SPAM LOCK: Prevent double execution
+     if (isAdmittingRef.current) return;
+     
+     // SAFETY CHECK: Ensure activeCall exists
+     if (!activeCall || !activeCall.data) {
+         setActiveCall(null);
+         return;
      }
-     setActiveCall(null);
+
+     isAdmittingRef.current = true;
+     SoundSystem.play('CLICK');
+
+     try {
+         if (decision === 'ACCEPT' && selectedTriage) {
+            const emptyBed = beds.find(b => b.status === 'EMPTY');
+            if (emptyBed) {
+               const actualTriage = activeCall.data.triage;
+               let initSat = 60;
+               let initCondition = 100;
+               let xpBonus = 0;
+               let msg = "";
+               let type = "success";
+
+               // Triage Logic Check
+               if (selectedTriage === actualTriage) {
+                   // Correct
+                   xpBonus = 50;
+                   initSat = 80;
+                   msg = `Correct Triage! (+${xpBonus} XP) Patient is stable.`;
+                   SoundSystem.play('SUCCESS');
+               } else if (
+                   (actualTriage === 'RED' && selectedTriage !== 'RED') || 
+                   (actualTriage === 'YELLOW' && selectedTriage === 'GREEN')
+               ) {
+                   // Under-triage (Dangerous)
+                   initCondition = 50; // Patient deteriorates immediately
+                   initSat = 40;
+                   msg = `⚠ UNDER-TRIAGE! Patient condition Critical!`;
+                   type = "error";
+                   SoundSystem.play('ALARM');
+               } else {
+                   // Over-triage (Wasteful)
+                   msg = "Over-triage. Safe but resources wasted.";
+                   type = "info";
+               }
+
+               const newPatient = {
+                 ...activeCall.data, 
+                 id: emptyBed.id, 
+                 status: 'OCCUPIED', 
+                 name: `Pt. ${Math.floor(Math.random()*1000)}`,
+                 hn: `${Math.floor(Math.random()*50000)}`, 
+                 age: 40 + Math.floor(Math.random()*40),
+                 currentVitals: activeCall.data.vitals,
+                 tasks: activeCall.data.orders.map(tid => {
+                     // Safety Fallback: ป้องกัน Task หายแล้วเกมพัง
+                     const t = TASKS_DB.find(x => x.id === tid) || TASKS_DB[0];
+                     return { ...t, uid: Math.random(), status: 'PENDING' };
+                 }),
+                 nurseId: [], 
+                 actionProgress: 0, 
+                 condition: initCondition, 
+                 satisfaction: initSat, 
+                 complaints: [], 
+                 satTrend: 0 
+               };
+               
+               setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
+               setScore(s => s + 50 + xpBonus);
+               if(user && xpBonus > 0) {
+                   // Instant XP update for fun with Safety Check
+                   setUser(prev => {
+                       if(!prev) return null; // ป้องกัน Crash ถ้า User State ไม่พร้อม
+                       return {...prev, xp: prev.xp + xpBonus};
+                   });
+               }
+               
+               showToast(msg, type);
+            } else {
+               showToast('No beds available!', 'error');
+               SoundSystem.play('ERROR');
+               setScore(s => s - 10);
+            }
+         } else {
+            logTimeline('Refused Admission', 'neutral');
+         }
+     } catch (e) {
+         console.error("Admit Error:", e);
+     } finally {
+         setActiveCall(null);
+         // Unlock after short delay
+         setTimeout(() => { isAdmittingRef.current = false; }, 500);
+     }
   };
 
   const endGame = async (isVictory = false) => {
@@ -1230,6 +1323,7 @@ export default function NurseCommanderPro() {
   );
 
   const renderKardex = () => {
+    // FIX: Use current bed state instead of potentially stale 'selectedBed' state
     if (!selectedBed) return null;
     const triageColor = selectedBed.triage === 'RED' ? 'bg-red-100 text-red-800' : selectedBed.triage === 'YELLOW' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
 
@@ -1244,7 +1338,7 @@ export default function NurseCommanderPro() {
                    <div className="text-sm opacity-70">HN: {selectedBed.hn} | Age: {selectedBed.age}</div>
                 </div>
              </div>
-             <button onClick={() => setSelectedBed(null)} className="p-2 hover:bg-white/20 rounded-full"><X/></button>
+             <button onClick={() => setSelectedBedId(null)} className="p-2 hover:bg-white/20 rounded-full"><X/></button>
           </div>
 
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -1376,7 +1470,63 @@ export default function NurseCommanderPro() {
     );
   };
 
-  // --- UPDATED: Phone Call UI with Triage Buttons ---
+  const renderShop = () => {
+      if(!showShop) return null;
+      return (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-slate-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-slate-600">
+                <div className="p-4 bg-slate-900 flex justify-between items-center border-b border-slate-700">
+                    <div className="flex items-center gap-2 text-white font-bold text-xl">
+                        <ShoppingBag className="text-yellow-400" /> Ward Upgrades
+                    </div>
+                    <button onClick={() => setShowShop(false)} className="text-slate-400 hover:text-white"><X/></button>
+                </div>
+                <div className="p-6 grid gap-4">
+                    <div className="flex justify-between items-center bg-slate-700/50 p-3 rounded-xl mb-2">
+                        <span className="text-slate-400 text-sm">Current Profit</span>
+                        <span className="text-2xl font-mono font-bold text-green-400">{formatMoney(financials.profit)}</span>
+                    </div>
+                    {SHOP_ITEMS.map(item => {
+                        const currentLv = wardUpgrades[item.id];
+                        const isMax = currentLv >= item.maxLv;
+                        const cost = Math.floor(item.baseCost * Math.pow(item.costMult, currentLv));
+                        const canAfford = financials.profit >= cost;
+
+                        return (
+                            <div key={item.id} className="bg-slate-700 p-4 rounded-xl flex items-center justify-between border border-slate-600">
+                                <div className="flex items-center gap-4">
+                                    <div className={`p-3 rounded-lg ${isMax ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                        <item.icon size={24} />
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-white flex items-center gap-2">
+                                            {item.name} 
+                                            <span className="text-xs bg-slate-900 px-2 py-0.5 rounded text-slate-300">Lv. {currentLv}/{item.maxLv}</span>
+                                        </div>
+                                        <div className="text-xs text-slate-400">{item.desc}</div>
+                                    </div>
+                                </div>
+                                {isMax ? (
+                                    <button disabled className="px-4 py-2 bg-slate-600 text-slate-400 rounded-lg font-bold text-xs">MAXED</button>
+                                ) : (
+                                    <button 
+                                        onClick={() => buyUpgrade(item.id)}
+                                        disabled={!canAfford}
+                                        className={`px-4 py-2 rounded-lg font-bold text-sm flex flex-col items-end min-w-[100px] transition-all ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg' : 'bg-slate-600 text-slate-400 cursor-not-allowed'}`}
+                                    >
+                                        <span>Upgrade</span>
+                                        <span className="text-xs opacity-80">{formatMoney(cost)}</span>
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+      );
+  };
+
   const renderPhoneCall = () => {
     if (!activeCall) return null;
     const { data } = activeCall;
@@ -1550,6 +1700,7 @@ export default function NurseCommanderPro() {
       {renderAlert()}
       {renderPhoneCall()}
       {renderEndGame()}
+      {renderShop()}
 
       <div className={`h-16 ${WardConfig.color} text-white flex items-center justify-between px-4 shadow-lg z-40 shrink-0`}>
          <div className="flex items-center gap-3">
@@ -1571,6 +1722,9 @@ export default function NurseCommanderPro() {
          </div>
 
          <div className="flex items-center gap-2">
+            <button onClick={() => setShowShop(true)} className="p-2 rounded-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 transition-all shadow-lg animate-pulse" title="Ward Shop">
+                <ShoppingBag size={20}/>
+            </button>
             <div className="md:hidden font-mono font-bold text-white text-sm mr-2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded"><Clock size={12}/> {formatTime(simTime)}</div>
             <button onClick={toggleSound} className={`p-2 rounded-full transition-all ${soundEnabled ? 'bg-white/20 text-white' : 'bg-red-500/20 text-red-300'}`}>{soundEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button>
             <button onClick={() => setGameSpeed(s => s === 0 ? 1 : 0)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-all">{gameSpeed === 0 ? <Play fill="currentColor"/> : <Pause fill="currentColor"/>}</button>
@@ -1592,7 +1746,7 @@ export default function NurseCommanderPro() {
                       if (bed.triage === 'GREEN') borderClass = 'triage-green';
                   }
                   return (
-                      <div key={bed.id} onClick={() => !isEmpty && !isDead && setSelectedBed(bed)}
+                      <div key={bed.id} onClick={() => !isEmpty && !isDead && setSelectedBedId(bed.id)}
                          className={`relative h-64 rounded-xl p-3 flex flex-col shadow-sm transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 bg-white ${borderClass} ${isCrit ? 'ring-4 ring-red-500 animate-pulse' : ''} ${isDead ? 'opacity-50 grayscale' : ''} ${isEmpty ? 'opacity-60 border-dashed border-4 border-slate-300' : ''} ${bed.complaints && bed.complaints.length > 0 ? 'shake-element' : ''}`}>
                          {isEmpty ? (
                             <div className="flex flex-col items-center justify-center h-full text-slate-400"><UserPlus size={40}/><span className="font-bold mt-2">VACANT</span></div>
