@@ -12,13 +12,13 @@ import {
   Smile, Frown, Meh, Zap, Coffee, Shield, Ghost,
   ThumbsDown, ThumbsUp, Sparkles, Angry, Flame,
   Volume2, VolumeX, Trophy, Medal, Crown, UserCircle,
-  Edit, Save // เพิ่มไอคอนสำหรับแก้ไขและบันทึก
+  Edit, Save
 } from 'lucide-react';
 // Firebase Imports
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp, 
-  doc, setDoc, getDoc, updateDoc // เพิ่ม updateDoc
+  doc, setDoc, getDoc, updateDoc 
 } from 'firebase/firestore';
 import { 
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged 
@@ -230,6 +230,7 @@ export default function NurseCommanderPro() {
   // User System State
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthProcessing, setIsAuthProcessing] = useState(false); // แก้ปัญหาปุ่มกดไม่ติด (ป้องกันกดรัว)
   
   // Profile Editing State
   const [isEditingName, setIsEditingName] = useState(false);
@@ -277,13 +278,14 @@ export default function NurseCommanderPro() {
 
   // --- AUTH CHECK ---
   useEffect(() => {
-    // Timeout Safety: 3 seconds max loading
+    // แก้ปัญหาหน้าจอ Loading ค้าง: ตั้งเวลา 4 วินาที ถ้าโหลดไม่เสร็จให้ดีดไปหน้า Login
     const safetyTimer = setTimeout(() => {
         if (phase === 'LOADING') {
+            console.log("Auth check timed out, forcing login screen.");
             setAuthLoading(false);
             setPhase('LOGIN');
         }
-    }, 3000);
+    }, 4000);
 
     const unsubscribe = onAuthStateChanged(auth, 
       async (currentUser) => {
@@ -295,15 +297,8 @@ export default function NurseCommanderPro() {
             if (docSnap.exists()) {
               setUser({ ...docSnap.data(), uid: currentUser.uid });
             } else {
-              const newUser = {
-                nickname: currentUser.email.split('@')[0],
-                email: currentUser.email,
-                xp: 0,
-                matches: 0,
-                wins: 0
-              };
-              await setDoc(doc(db, "users", currentUser.uid), newUser);
-              setUser({ ...newUser, uid: currentUser.uid });
+              // กรณีล็อกอินสำเร็จแต่ไม่มีโปรไฟล์ (อาจเกิดจากตอนสมัครเน็ตหลุด)
+              console.log("Profile not found in auth check.");
             }
             setPhase('MENU');
           } catch (e) {
@@ -319,7 +314,6 @@ export default function NurseCommanderPro() {
         clearTimeout(safetyTimer);
       }, 
       (error) => {
-        // Error Handler (e.g., Auth disabled)
         console.error("Auth Error:", error);
         setAuthLoading(false);
         setPhase('LOGIN');
@@ -362,14 +356,35 @@ export default function NurseCommanderPro() {
   // --- AUTH FUNCTIONS ---
   const handleAuth = async (e) => {
     e.preventDefault();
+    if (isAuthProcessing) return; // ป้องกันการกดปุ่มซ้ำ
+
     const email = emailRef.current.value;
     const password = passwordRef.current.value;
     
+    // --- VALIDATION (แก้ปัญหาปุ่มกดไม่ติด) ---
+    if (!email || !password) {
+        showToast("กรุณากรอกข้อมูลให้ครบถ้วน", "error");
+        return;
+    }
+    // ** จุดที่แก้ไข: เช็คความยาวรหัสผ่าน และแจ้งเตือนเป็นภาษาไทย **
+    if (password.length < 6) {
+        showToast("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษรครับ", "error");
+        return;
+    }
+
+    setIsAuthProcessing(true); // เริ่มหมุน Loading ที่ปุ่ม
+    
     try {
       if (isRegistering) {
-        const nickname = nicknameRef.current.value;
+        const nickname = nicknameRef.current ? nicknameRef.current.value : "Nurse";
+        if (!nickname) {
+             showToast("กรุณาตั้งชื่อเล่น (ฉายา)", "error");
+             setIsAuthProcessing(false);
+             return;
+        }
+
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Create User Profile in Firestore
+        // สร้างโปรไฟล์ใน Firestore ทันทีที่สมัครเสร็จ
         const newUser = {
           nickname: nickname,
           email: email,
@@ -377,14 +392,32 @@ export default function NurseCommanderPro() {
           matches: 0,
           wins: 0
         };
-        await setDoc(doc(db, "users", userCredential.user.uid), newUser);
-        showToast("Registration Successful!", "success");
+        
+        try {
+            await setDoc(doc(db, "users", userCredential.user.uid), newUser);
+            // ตั้งค่า user state เองเลย ไม่ต้องรอ onAuthStateChanged (แก้ปัญหา Race Condition)
+            setUser({ ...newUser, uid: userCredential.user.uid });
+            showToast("สมัครสมาชิกสำเร็จ!", "success");
+            setPhase('MENU'); // บังคับไปหน้าเมนู
+        } catch (docError) {
+            console.error("Firestore Error:", docError);
+            showToast("สมัครสำเร็จแต่สร้างโปรไฟล์ไม่ผ่าน (เช็ค Database)", "warning");
+        }
+
       } else {
         await signInWithEmailAndPassword(auth, email, password);
-        showToast("Welcome back!", "success");
+        showToast("ยินดีต้อนรับกลับมา!", "success");
+        // การเปลี่ยนหน้าจะจัดการโดย onAuthStateChanged เอง
       }
     } catch (error) {
-      showToast(error.message, "error");
+      console.error("Auth Action Error:", error);
+      let msg = error.message;
+      if (msg.includes("auth/email-already-in-use")) msg = "อีเมลนี้มีผู้ใช้งานแล้วครับ";
+      if (msg.includes("auth/invalid-credential")) msg = "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
+      if (msg.includes("auth/weak-password")) msg = "รหัสผ่านง่ายเกินไป (ต้องมี 6 ตัวขึ้นไป)";
+      showToast(msg, "error");
+    } finally {
+        setIsAuthProcessing(false); // หยุดหมุน Loading
     }
   };
 
@@ -399,11 +432,11 @@ export default function NurseCommanderPro() {
         await updateDoc(doc(db, "users", user.uid), { nickname: newName });
         setUser({...user, nickname: newName});
         setIsEditingName(false);
-        showToast("Profile updated!", "success");
+        showToast("อัปเดตชื่อสำเร็จ!", "success");
         SoundSystem.play('SUCCESS');
     } catch (error) {
         console.error("Error updating profile:", error);
-        showToast("Failed to update profile", "error");
+        showToast("ไม่สามารถอัปเดตชื่อได้", "error");
         SoundSystem.play('ERROR');
     }
   };
@@ -507,11 +540,13 @@ export default function NurseCommanderPro() {
   useEffect(() => {
     if (phase !== 'GAME') return;
 
+    // ** ปรับความเร็ว Loop เป็น 100ms (ลดภาระเครื่อง) แต่ชดเชยการคำนวณให้เท่าเดิม **
     loopRef.current = setInterval(() => {
       if (gameSpeed === 0 || activeAlert || activeCall) return;
 
       setSimTime(prevTime => {
-        const nextTime = prevTime + (6 * gameSpeed);
+        // เพิ่มเวลาทีละ 12 วินาที (จากเดิม 6) เพราะ Loop ช้าลง 2 เท่า
+        const nextTime = prevTime + (12 * gameSpeed); 
         const startTime = 28800; // 08:00
         const elapsed = nextTime - startTime;
         const calculatedShift = Math.floor(elapsed / SHIFT_DURATION) + 1;
@@ -523,18 +558,19 @@ export default function NurseCommanderPro() {
       });
 
       const rand = Math.random();
-      if (rand < 0.002 * gameSpeed && beds.some(b => b.status === 'EMPTY') && !activeCall) {
+      // ปรับความน่าจะเป็นของเหตุการณ์ (คูณ 2 เพื่อชดเชย)
+      if (rand < 0.004 * gameSpeed && beds.some(b => b.status === 'EMPTY') && !activeCall) {
         const template = PATIENT_TEMPLATES[Math.floor(Math.random() * PATIENT_TEMPLATES.length)];
         setActiveCall({ type: 'ADMIT', data: template });
       }
-      if (rand < 0.001 * gameSpeed && !activeAlert) triggerCriticalEvent();
-      if (rand < 0.015 * gameSpeed) addRandomTask();
-      if (rand < 0.0015 * gameSpeed) addDischargeOrder();
+      if (rand < 0.002 * gameSpeed && !activeAlert) triggerCriticalEvent();
+      if (rand < 0.03 * gameSpeed) addRandomTask();
+      if (rand < 0.003 * gameSpeed) addDischargeOrder();
 
       updateBeds();
       updateStaff();
 
-    }, 50);
+    }, 100); // เปลี่ยนจาก 50 เป็น 100 ms
 
     return () => clearInterval(loopRef.current);
   }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount]);
@@ -579,13 +615,14 @@ export default function NurseCommanderPro() {
       const criticalTasks = bed.tasks.filter(t => t.type === 'CRITICAL' || t.type === 'ADVANCED');
       const pendingTasks = bed.tasks.filter(t => t.status === 'PENDING').length;
       
-      if (criticalTasks.length > 0) conditionDrop += 0.05 * gameSpeed;
-      if (bed.status === 'CRITICAL') conditionDrop += 0.2;
-      if (pendingTasks > 2) satChange -= 0.02 * gameSpeed; 
-      if (bed.condition < 50) satChange -= 0.01 * gameSpeed; 
+      // ปรับค่าพลังงานให้สมดุลกับ Loop 100ms
+      if (criticalTasks.length > 0) conditionDrop += 0.1 * gameSpeed;
+      if (bed.status === 'CRITICAL') conditionDrop += 0.4;
+      if (pendingTasks > 2) satChange -= 0.04 * gameSpeed; 
+      if (bed.condition < 50) satChange -= 0.02 * gameSpeed; 
       
       let newComplaints = [...bed.complaints];
-      if (bed.satisfaction < 30 && bed.complaints.length === 0 && Math.random() < 0.01) {
+      if (bed.satisfaction < 30 && bed.complaints.length === 0 && Math.random() < 0.02) {
           const complaint = COMPLAINT_TYPES[Math.floor(Math.random() * COMPLAINT_TYPES.length)];
           newComplaints.push(complaint);
           showToast(`Complaint at Bed ${bed.id}: ${complaint.text}`, 'error');
@@ -605,12 +642,14 @@ export default function NurseCommanderPro() {
            power *= (1 + (n.level * 0.05));
            if (n.traits.includes('SPEED')) power *= 1.2;
            if (n.traits.includes('LAZY')) power *= 0.8;
-           if (n.traits.includes('GRUMPY')) satChange -= 0.05 * gameSpeed;
-           if (n.traits.includes('ANGEL')) satChange += 0.05 * gameSpeed;
+           if (n.traits.includes('GRUMPY')) satChange -= 0.1 * gameSpeed;
+           if (n.traits.includes('ANGEL')) satChange += 0.1 * gameSpeed;
            totalPower += power;
         });
         if (nurses.some(n => n.traits.includes('MENTOR'))) totalPower *= 1.15; 
-        const step = (totalPower / 20) * 3 * gameSpeed;
+        
+        // เพิ่มความเร็วในการทำงานเล็กน้อย (คูณ 6 แทน 3)
+        const step = (totalPower / 20) * 6 * gameSpeed;
         newProgress += step;
         if (newProgress >= 100) justCompleted = true;
       }
@@ -642,9 +681,10 @@ export default function NurseCommanderPro() {
         let drainRate = 0.05;
         if (s.traits.includes('STAMINA')) drainRate *= 0.7; 
         if (s.traits.includes('LAZY')) drainRate *= 1.2; 
-        staminaChange = -(drainRate * gameSpeed);
+        // ปรับอัตราลดพลังงานให้สมดุล
+        staminaChange = -(drainRate * 2 * gameSpeed);
       } else {
-        staminaChange = 0.1 * gameSpeed; 
+        staminaChange = 0.2 * gameSpeed; 
       }
       return { ...s, stamina: Math.max(0, Math.min(100, s.stamina + staminaChange)) };
     }));
@@ -951,6 +991,7 @@ export default function NurseCommanderPro() {
                     <div>
                         <label className="block text-slate-300 text-sm font-bold mb-2">Password</label>
                         <input ref={passwordRef} type="password" required className="w-full p-3 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-blue-500" placeholder="********" />
+                        <p className="text-xs text-slate-500 mt-1">*รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร</p>
                     </div>
                     
                     {isRegistering && (
@@ -960,7 +1001,12 @@ export default function NurseCommanderPro() {
                        </div>
                     )}
 
-                    <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-blue-500/50">
+                    <button 
+                        type="submit" 
+                        disabled={isAuthProcessing}
+                        className={`w-full py-3 text-white font-bold rounded-xl transition-all shadow-lg flex justify-center items-center gap-2 ${isAuthProcessing ? 'bg-slate-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/50'}`}
+                    >
+                        {isAuthProcessing && <RefreshCw className="animate-spin" size={18}/>}
                         {isRegistering ? 'Register & Start' : 'Login'}
                     </button>
                     
