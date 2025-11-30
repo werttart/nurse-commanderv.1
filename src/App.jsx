@@ -865,22 +865,67 @@ export default function NurseCommanderPro() {
     logTimeline('Doctor ordered discharge.', 'info');
   };
 
-  const admitPatient = (decision) => {
+  // --- UPDATED: Admit with Triage Logic ---
+  const admitPatient = (decision, selectedTriage = null) => {
      SoundSystem.play('CLICK');
-     if (decision === 'ACCEPT') {
+     if (decision === 'ACCEPT' && selectedTriage) {
         const emptyBed = beds.find(b => b.status === 'EMPTY');
         if (emptyBed) {
+           const actualTriage = activeCall.data.triage;
+           let initSat = 60;
+           let initCondition = 100;
+           let xpBonus = 0;
+           let msg = "";
+           let type = "success";
+
+           // Triage Logic Check
+           if (selectedTriage === actualTriage) {
+               // Correct
+               xpBonus = 50;
+               initSat = 80;
+               msg = `Correct Triage! (+${xpBonus} XP) Patient is stable.`;
+               SoundSystem.play('SUCCESS');
+           } else if (
+               (actualTriage === 'RED' && selectedTriage !== 'RED') || 
+               (actualTriage === 'YELLOW' && selectedTriage === 'GREEN')
+           ) {
+               // Under-triage (Dangerous)
+               initCondition = 50; // Patient deteriorates immediately
+               initSat = 40;
+               msg = `⚠ UNDER-TRIAGE! Patient condition Critical!`;
+               type = "error";
+               SoundSystem.play('ALARM');
+           } else {
+               // Over-triage (Wasteful)
+               msg = "Over-triage. Safe but resources wasted.";
+               type = "info";
+           }
+
            const newPatient = {
-             ...activeCall.data, id: emptyBed.id, status: 'OCCUPIED', name: `Pt. ${Math.floor(Math.random()*1000)}`,
-             hn: `${Math.floor(Math.random()*50000)}`, age: 40 + Math.floor(Math.random()*40),
+             ...activeCall.data, 
+             id: emptyBed.id, 
+             status: 'OCCUPIED', 
+             name: `Pt. ${Math.floor(Math.random()*1000)}`,
+             hn: `${Math.floor(Math.random()*50000)}`, 
+             age: 40 + Math.floor(Math.random()*40),
              currentVitals: activeCall.data.vitals,
              tasks: activeCall.data.orders.map(tid => ({ ...TASKS_DB.find(t=>t.id===tid), uid: Math.random(), status: 'PENDING' })),
-             nurseId: [], actionProgress: 0, condition: 100, satisfaction: 60, complaints: [], satTrend: 0
+             nurseId: [], 
+             actionProgress: 0, 
+             condition: initCondition, 
+             satisfaction: initSat, 
+             complaints: [], 
+             satTrend: 0 
            };
+           
            setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
-           setScore(s => s + 50);
-           showToast('Admitted successfully', 'success');
-           SoundSystem.play('SUCCESS');
+           setScore(s => s + 50 + xpBonus);
+           if(user && xpBonus > 0) {
+               // Instant XP update for fun
+               setUser(prev => ({...prev, xp: prev.xp + xpBonus}));
+           }
+           
+           showToast(msg, type);
         } else {
            showToast('No beds available!', 'error');
            SoundSystem.play('ERROR');
@@ -1321,6 +1366,7 @@ export default function NurseCommanderPro() {
     );
   };
 
+  // --- UPDATED: Phone Call UI with Triage Buttons ---
   const renderPhoneCall = () => {
     if (!activeCall) return null;
     const { data } = activeCall;
@@ -1328,17 +1374,31 @@ export default function NurseCommanderPro() {
       <div className="fixed bottom-20 md:bottom-4 left-4 right-4 md:left-auto md:right-4 z-[70] w-auto md:w-96 bg-slate-800 text-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up border border-slate-600">
          <div className="p-4 bg-blue-600 flex items-center gap-3"><PhoneCall className="animate-phone"/><div className="font-bold">Incoming Admission</div></div>
          <div className="p-4">
-            <div className="flex justify-between items-start mb-4">
-               <div>
-                  <div className="text-lg font-bold">{data.dx}</div>
-                  <div className={`inline-block px-2 rounded text-xs font-bold text-slate-900 ${data.triage==='RED'?'bg-red-400':data.triage==='YELLOW'?'bg-yellow-400':'bg-green-400'}`}>{data.triage} TRIAGE</div>
+            <div className="mb-4">
+               <div className="text-xs text-slate-400 uppercase font-bold mb-1">Chief Complaint / Dx</div>
+               <div className="text-lg font-bold mb-2">{data.dx}</div>
+               
+               <div className="bg-slate-700 p-3 rounded-lg border border-slate-600">
+                   <div className="text-xs text-slate-400 uppercase font-bold mb-1">Vital Signs</div>
+                   <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+                       <div className={data.vitals.hr > 100 ? 'text-red-400' : 'text-green-400'}>HR: {Math.round(data.vitals.hr)}</div>
+                       <div className={data.vitals.bp_sys < 90 ? 'text-red-400' : 'text-green-400'}>BP: {Math.round(data.vitals.bp_sys)}</div>
+                       <div className={data.vitals.spo2 < 95 ? 'text-red-400' : 'text-green-400'}>SpO2: {Math.round(data.vitals.spo2)}%</div>
+                       <div className={data.vitals.temp > 37.5 ? 'text-red-400' : 'text-green-400'}>T: {data.vitals.temp.toFixed(1)}</div>
+                   </div>
                </div>
-               <div className="text-right text-sm opacity-70"><div>HR: {data.vitals.hr}</div><div>BP: {data.vitals.bp_sys}</div></div>
+               
+               <div className="mt-3 text-xs text-center text-yellow-300 animate-pulse">
+                   ⚠ Assess Condition & Select Triage Zone
+               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-               <button onClick={() => admitPatient('ACCEPT')} className="bg-green-600 hover:bg-green-500 py-2 rounded-lg font-bold">Accept</button>
-               <button onClick={() => admitPatient('DENY')} className="bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold">Refuse (Full)</button>
+
+            <div className="grid grid-cols-3 gap-2 mb-2">
+               <button onClick={() => admitPatient('ACCEPT', 'RED')} className="bg-red-900/80 hover:bg-red-600 border border-red-500 py-3 rounded-lg font-bold text-xs transition-colors">RED ZONE<br/>(Emergency)</button>
+               <button onClick={() => admitPatient('ACCEPT', 'YELLOW')} className="bg-yellow-900/80 hover:bg-yellow-600 border border-yellow-500 py-3 rounded-lg font-bold text-xs text-yellow-100 transition-colors">YELLOW ZONE<br/>(Urgent)</button>
+               <button onClick={() => admitPatient('ACCEPT', 'GREEN')} className="bg-green-900/80 hover:bg-green-600 border border-green-500 py-3 rounded-lg font-bold text-xs transition-colors">GREEN ZONE<br/>(Non-Urgent)</button>
             </div>
+            <button onClick={() => admitPatient('DENY')} className="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded-lg font-bold text-sm text-slate-300">Refuse Admission (Full)</button>
          </div>
       </div>
     );
