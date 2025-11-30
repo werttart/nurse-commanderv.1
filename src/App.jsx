@@ -226,12 +226,12 @@ export default function NurseCommanderPro() {
   // --- CORE STATE ---
   const [phase, setPhase] = useState('LOADING'); 
   const [subPhase, setSubPhase] = useState(null);
-  
+   
   // User System State
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isAuthProcessing, setIsAuthProcessing] = useState(false); // แก้ปัญหาปุ่มกดไม่ติด (ป้องกันกดรัว)
-  
+   
   // Profile Editing State
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
@@ -241,7 +241,7 @@ export default function NurseCommanderPro() {
   const [shiftCount, setShiftCount] = useState(1);
   const [score, setScore] = useState(100);
   const [financials, setFinancials] = useState({ revenue: 0, cost: 0, profit: 0 });
-  
+   
   const [gameMode, setGameMode] = useState('NORMAL');
 
   const [config, setConfig] = useState({
@@ -252,12 +252,12 @@ export default function NurseCommanderPro() {
     endlessMode: false 
   });
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+   
   // --- ENTITIES ---
   const [beds, setBeds] = useState([]);
   const [staff, setStaff] = useState([]);
   const [timeline, setTimeline] = useState([]);
-  
+   
   // --- INTERACTION STATE ---
   const [selectedBed, setSelectedBed] = useState(null);
   const [activeAlert, setActiveAlert] = useState(null);
@@ -293,7 +293,7 @@ export default function NurseCommanderPro() {
           try {
             const docRef = doc(db, "users", currentUser.uid);
             const docSnap = await getDoc(docRef);
-            
+             
             if (docSnap.exists()) {
               setUser({ ...docSnap.data(), uid: currentUser.uid });
             } else {
@@ -339,8 +339,8 @@ export default function NurseCommanderPro() {
                     fetchedData.push(doc.data());
                 });
                 if(fetchedData.length > 0) {
-                     const ranked = fetchedData.map((d, index) => ({...d, rank: index + 1}));
-                     setLeaderboardData(ranked);
+                      const ranked = fetchedData.map((d, index) => ({...d, rank: index + 1}));
+                      setLeaderboardData(ranked);
                 } else {
                     setLeaderboardData(MOCK_LEADERBOARD);
                 }
@@ -378,9 +378,9 @@ export default function NurseCommanderPro() {
       if (isRegistering) {
         const nickname = nicknameRef.current ? nicknameRef.current.value : "Nurse";
         if (!nickname) {
-             showToast("กรุณาตั้งชื่อเล่น (ฉายา)", "error");
-             setIsAuthProcessing(false);
-             return;
+              showToast("กรุณาตั้งชื่อเล่น (ฉายา)", "error");
+              setIsAuthProcessing(false);
+              return;
         }
 
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -470,7 +470,7 @@ export default function NurseCommanderPro() {
       const traitKeys = Object.keys(STAFF_TRAITS);
       const assignedTraits = [];
       const numTraits = role.traitCount;
-      
+       
       for(let k=0; k<numTraits; k++) {
         if(Math.random() > 0.3) { 
            const randomTrait = traitKeys[Math.floor(Math.random() * traitKeys.length)];
@@ -611,16 +611,16 @@ export default function NurseCommanderPro() {
 
       let conditionDrop = 0;
       let satChange = 0;
-      
+       
       const criticalTasks = bed.tasks.filter(t => t.type === 'CRITICAL' || t.type === 'ADVANCED');
       const pendingTasks = bed.tasks.filter(t => t.status === 'PENDING').length;
-      
+       
       // ปรับค่าพลังงานให้สมดุลกับ Loop 100ms
       if (criticalTasks.length > 0) conditionDrop += 0.1 * gameSpeed;
       if (bed.status === 'CRITICAL') conditionDrop += 0.4;
       if (pendingTasks > 2) satChange -= 0.04 * gameSpeed; 
       if (bed.condition < 50) satChange -= 0.02 * gameSpeed; 
-      
+       
       let newComplaints = [...bed.complaints];
       if (bed.satisfaction < 30 && bed.complaints.length === 0 && Math.random() < 0.02) {
           const complaint = COMPLAINT_TYPES[Math.floor(Math.random() * COMPLAINT_TYPES.length)];
@@ -910,8 +910,9 @@ export default function NurseCommanderPro() {
             // Update User Profile
             await setDoc(doc(db, "users", user.uid), newUserState);
             
-            // Add to Leaderboard
-            await addDoc(collection(db, "leaderboard"), {
+            // --- FIX: ใช้ setDoc แทน addDoc เพื่ออัปเดตข้อมูลเดิม ไม่ใช่สร้างใหม่ ---
+            // Add or Update Leaderboard (Use user.uid as document ID)
+            await setDoc(doc(db, "leaderboard", user.uid), {
                 name: user.nickname,
                 xp: newUserState.xp,
                 title: getRankData(newUserState.xp).title,
@@ -920,7 +921,7 @@ export default function NurseCommanderPro() {
                 profit: financials.profit,
                 uid: user.uid
             });
-            console.log("Score saved to Firestore");
+            console.log("Score saved to Firestore (Updated)");
             rankUpdateMsg = `Ranking XP Gained: +${xpGained}`;
         } catch (e) {
             console.error("Error adding document: ", e);
@@ -1266,12 +1267,12 @@ export default function NurseCommanderPro() {
                                   return (
                                     <button key={s.id} disabled={!isFree} onClick={() => assignTask(s.id, selectedBed.id, task)}
                                       className={`px-3 py-2 rounded border flex items-center gap-2 ${!canDo ? 'opacity-30 cursor-not-allowed bg-slate-100' : isFree ? 'hover:bg-blue-100 border-slate-300 hover:border-blue-500' : 'opacity-50 bg-slate-100'}`}>
-                                        <span className="text-lg">{s.icon}</span>
-                                        <div className="text-left">
-                                           <div className="text-xs font-bold">{s.name}</div>
-                                           <div className={`text-[9px] ${s.stamina < 30 ? 'text-red-500' : 'text-green-500'}`}>{Math.round(s.stamina)}% En</div>
-                                        </div>
-                                        <div className="bg-yellow-100 text-yellow-700 text-[8px] px-1 rounded font-bold ml-1">Lv.{s.level}</div>
+                                          <span className="text-lg">{s.icon}</span>
+                                          <div className="text-left">
+                                             <div className="text-xs font-bold">{s.name}</div>
+                                             <div className={`text-[9px] ${s.stamina < 30 ? 'text-red-500' : 'text-green-500'}`}>{Math.round(s.stamina)}% En</div>
+                                          </div>
+                                          <div className="bg-yellow-100 text-yellow-700 text-[8px] px-1 rounded font-bold ml-1">Lv.{s.level}</div>
                                     </button>
                                   )
                               })}
@@ -1519,37 +1520,37 @@ export default function NurseCommanderPro() {
                       if (bed.triage === 'GREEN') borderClass = 'triage-green';
                   }
                   return (
-                     <div key={bed.id} onClick={() => !isEmpty && !isDead && setSelectedBed(bed)}
-                        className={`relative h-64 rounded-xl p-3 flex flex-col shadow-sm transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 bg-white ${borderClass} ${isCrit ? 'ring-4 ring-red-500 animate-pulse' : ''} ${isDead ? 'opacity-50 grayscale' : ''} ${isEmpty ? 'opacity-60 border-dashed border-4 border-slate-300' : ''} ${bed.complaints && bed.complaints.length > 0 ? 'shake-element' : ''}`}>
-                        {isEmpty ? (
-                           <div className="flex flex-col items-center justify-center h-full text-slate-400"><UserPlus size={40}/><span className="font-bold mt-2">VACANT</span></div>
-                        ) : isDead ? (
-                           <div className="flex flex-col items-center justify-center h-full text-slate-600"><Skull size={40}/><span className="font-bold mt-2">DECEASED</span></div>
-                        ) : (
-                           <>
-                              <div className="flex justify-between items-start mb-2"><span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span><div className="flex gap-1">{isCrit && <AlertTriangle size={16} className="text-red-600"/>}{bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}</div></div>
-                              <div className="bg-black rounded h-12 mb-2 relative overflow-hidden border border-slate-700 flex items-center px-2"><div className="absolute inset-0 opacity-20 ecg-line"></div><div className="relative z-10 w-full flex justify-between font-mono text-green-400 text-[10px] md:text-xs"><div className="flex flex-col"><span>HR {Math.round(bed.currentVitals.hr)}</span><span>BP {Math.round(bed.currentVitals.bp_sys)}</span></div><div className="flex flex-col items-end"><span>O2 {Math.round(bed.currentVitals.spo2)}%</span><span>T {bed.currentVitals.temp.toFixed(1)}</span></div></div></div>
-                              <div className="font-bold text-sm truncate text-slate-800">{bed.name}</div>
-                              <div className="text-xs text-slate-500 truncate mb-1">{bed.dx}</div>
-                              <div className="mb-2"><div className="flex justify-between items-center text-[9px] mb-0.5 font-bold"><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>SATISFACTION</span><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>{Math.round(bed.satisfaction)}%</span></div><div className="h-1 bg-slate-100 w-full rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${bed.satisfaction < 30 ? 'bg-red-500' : bed.satisfaction < 70 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${bed.satisfaction}%`}}></div></div></div>
-                              <div className="mt-auto">
-                                 {bed.nurseId.length > 0 ? (
-                                    <div className="w-full">
-                                       <div className="flex justify-between text-[10px] text-blue-600 font-bold mb-1 items-center"><div className="flex items-center gap-1 overflow-hidden"><RefreshCw size={10} className="animate-spin shrink-0"/><span className="truncate">{bed.nurseId.map(id => getStaffIcon(id)).join('')}</span></div><span>{Math.round(bed.actionProgress)}%</span></div>
-                                       <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-300" style={{width: `${bed.actionProgress}%`}}></div></div>
-                                    </div>
-                                 ) : (
-                                    <div className="flex gap-1 flex-wrap">
-                                       {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (<span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500':'bg-blue-400'}`}></span>))}
-                                       {bed.tasks.length > 3 && <span className="text-[9px] text-slate-400">+{bed.tasks.length-3}</span>}
-                                       {bed.tasks.length === 0 && <span className="text-[10px] text-green-500 font-bold flex items-center gap-1"><CheckCircle size={10}/> Stable</span>}
-                                    </div>
-                                 )}
-                              </div>
-                           </>
-                        )}
-                     </div>
-                  );
+                      <div key={bed.id} onClick={() => !isEmpty && !isDead && setSelectedBed(bed)}
+                         className={`relative h-64 rounded-xl p-3 flex flex-col shadow-sm transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 bg-white ${borderClass} ${isCrit ? 'ring-4 ring-red-500 animate-pulse' : ''} ${isDead ? 'opacity-50 grayscale' : ''} ${isEmpty ? 'opacity-60 border-dashed border-4 border-slate-300' : ''} ${bed.complaints && bed.complaints.length > 0 ? 'shake-element' : ''}`}>
+                         {isEmpty ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400"><UserPlus size={40}/><span className="font-bold mt-2">VACANT</span></div>
+                         ) : isDead ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-600"><Skull size={40}/><span className="font-bold mt-2">DECEASED</span></div>
+                         ) : (
+                            <>
+                               <div className="flex justify-between items-start mb-2"><span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span><div className="flex gap-1">{isCrit && <AlertTriangle size={16} className="text-red-600"/>}{bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}</div></div>
+                               <div className="bg-black rounded h-12 mb-2 relative overflow-hidden border border-slate-700 flex items-center px-2"><div className="absolute inset-0 opacity-20 ecg-line"></div><div className="relative z-10 w-full flex justify-between font-mono text-green-400 text-[10px] md:text-xs"><div className="flex flex-col"><span>HR {Math.round(bed.currentVitals.hr)}</span><span>BP {Math.round(bed.currentVitals.bp_sys)}</span></div><div className="flex flex-col items-end"><span>O2 {Math.round(bed.currentVitals.spo2)}%</span><span>T {bed.currentVitals.temp.toFixed(1)}</span></div></div></div>
+                               <div className="font-bold text-sm truncate text-slate-800">{bed.name}</div>
+                               <div className="text-xs text-slate-500 truncate mb-1">{bed.dx}</div>
+                               <div className="mb-2"><div className="flex justify-between items-center text-[9px] mb-0.5 font-bold"><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>SATISFACTION</span><span className={bed.satisfaction < 30 ? 'text-red-500' : 'text-slate-400'}>{Math.round(bed.satisfaction)}%</span></div><div className="h-1 bg-slate-100 w-full rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${bed.satisfaction < 30 ? 'bg-red-500' : bed.satisfaction < 70 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${bed.satisfaction}%`}}></div></div></div>
+                               <div className="mt-auto">
+                                  {bed.nurseId.length > 0 ? (
+                                     <div className="w-full">
+                                        <div className="flex justify-between text-[10px] text-blue-600 font-bold mb-1 items-center"><div className="flex items-center gap-1 overflow-hidden"><RefreshCw size={10} className="animate-spin shrink-0"/><span className="truncate">{bed.nurseId.map(id => getStaffIcon(id)).join('')}</span></div><span>{Math.round(bed.actionProgress)}%</span></div>
+                                        <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-300" style={{width: `${bed.actionProgress}%`}}></div></div>
+                                     </div>
+                                  ) : (
+                                     <div className="flex gap-1 flex-wrap">
+                                        {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (<span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500':'bg-blue-400'}`}></span>))}
+                                        {bed.tasks.length > 3 && <span className="text-[9px] text-slate-400">+{bed.tasks.length-3}</span>}
+                                        {bed.tasks.length === 0 && <span className="text-[10px] text-green-500 font-bold flex items-center gap-1"><CheckCircle size={10}/> Stable</span>}
+                                     </div>
+                                  )}
+                               </div>
+                            </>
+                         )}
+                      </div>
+                   );
                })}
             </div>
          </div>
@@ -1562,17 +1563,17 @@ export default function NurseCommanderPro() {
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
                {staff.map(s => (
                   <div key={s.id} className={`border rounded-xl p-3 shadow-sm transition-all ${s.status === 'IDLE' ? 'bg-white border-slate-200' : s.status==='CPR' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
-                     <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                           <div className="text-xl bg-slate-100 p-1 rounded relative">{s.icon}<div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">{s.level}</div></div>
-                           <div><div className="font-bold text-sm text-slate-800 flex items-center gap-1">{s.name}</div><div className="text-[10px] text-slate-500">{s.label}</div></div>
-                        </div>
-                        <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='CPR'?'bg-red-600 text-white animate-pulse':'bg-blue-100 text-blue-700'}`}>{s.status}</div>
-                     </div>
-                     <div className="mb-2"><div className="flex justify-between text-[8px] text-slate-400 mb-0.5"><span>EXP</span><span>{Math.floor(s.xp)}/{s.maxXp}</span></div><div className="h-1 bg-slate-100 rounded-full w-full"><div className="h-full bg-yellow-400 rounded-full transition-all" style={{width: `${(s.xp/s.maxXp)*100}%`}}></div></div></div>
-                     <div className="mb-2 flex gap-1 flex-wrap">{s.traits.map(tKey => {const T = STAFF_TRAITS[tKey]; return (<div key={tKey} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${T.type === 'POS' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={T.desc}>{T.icon && <T.icon size={10}/>} {T.name}</div>)})}</div>
-                     <div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${s.stamina < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${s.stamina}%`}}></div></div><span className="text-[9px] text-slate-400 font-mono">{Math.round(s.stamina)}%</span></div>
-                     {s.targetBedId && (<div className="mt-2 text-xs flex items-center justify-between bg-white/50 p-1 rounded"><span className="text-slate-500 flex items-center gap-1"><ArrowRight size={10}/> Bed {s.targetBedId}</span><span className="font-bold text-blue-600 truncate max-w-[100px]">{s.action}</span></div>)}
+                      <div className="flex justify-between items-start mb-2">
+                         <div className="flex items-center gap-2">
+                            <div className="text-xl bg-slate-100 p-1 rounded relative">{s.icon}<div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">{s.level}</div></div>
+                            <div><div className="font-bold text-sm text-slate-800 flex items-center gap-1">{s.name}</div><div className="text-[10px] text-slate-500">{s.label}</div></div>
+                         </div>
+                         <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='CPR'?'bg-red-600 text-white animate-pulse':'bg-blue-100 text-blue-700'}`}>{s.status}</div>
+                      </div>
+                      <div className="mb-2"><div className="flex justify-between text-[8px] text-slate-400 mb-0.5"><span>EXP</span><span>{Math.floor(s.xp)}/{s.maxXp}</span></div><div className="h-1 bg-slate-100 rounded-full w-full"><div className="h-full bg-yellow-400 rounded-full transition-all" style={{width: `${(s.xp/s.maxXp)*100}%`}}></div></div></div>
+                      <div className="mb-2 flex gap-1 flex-wrap">{s.traits.map(tKey => {const T = STAFF_TRAITS[tKey]; return (<div key={tKey} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${T.type === 'POS' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={T.desc}>{T.icon && <T.icon size={10}/>} {T.name}</div>)})}</div>
+                      <div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${s.stamina < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${s.stamina}%`}}></div></div><span className="text-[9px] text-slate-400 font-mono">{Math.round(s.stamina)}%</span></div>
+                      {s.targetBedId && (<div className="mt-2 text-xs flex items-center justify-between bg-white/50 p-1 rounded"><span className="text-slate-500 flex items-center gap-1"><ArrowRight size={10}/> Bed {s.targetBedId}</span><span className="font-bold text-blue-600 truncate max-w-[100px]">{s.action}</span></div>)}
                   </div>
                ))}
             </div>
