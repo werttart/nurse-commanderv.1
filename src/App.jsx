@@ -203,6 +203,8 @@ export default function NurseCommanderPro() {
   };
 
   const formatMoney = (amount) => {
+    // Safety check: ป้องกันจอขาวถ้าค่าเงินเป็น null/undefined/NaN
+    if (amount === undefined || amount === null || isNaN(amount)) return "฿0";
     return amount.toLocaleString('th-TH', { style: 'currency', currency: 'THB' });
   };
 
@@ -517,7 +519,8 @@ export default function NurseCommanderPro() {
   const generatePatient = (bedId) => {
     const template = PATIENT_TEMPLATES[Math.floor(Math.random() * PATIENT_TEMPLATES.length)];
     const tasks = template.orders.map(tid => {
-      const t = TASKS_DB.find(x => x.id === tid);
+      // Safety Fallback: ถ้าหา Task ไม่เจอ ให้ใช้ค่า Default แทนที่จะปล่อยให้พัง
+      const t = TASKS_DB.find(x => x.id === tid) || TASKS_DB[0];
       return { ...t, uid: Math.random(), status: 'PENDING' };
     });
 
@@ -909,7 +912,11 @@ export default function NurseCommanderPro() {
              hn: `${Math.floor(Math.random()*50000)}`, 
              age: 40 + Math.floor(Math.random()*40),
              currentVitals: activeCall.data.vitals,
-             tasks: activeCall.data.orders.map(tid => ({ ...TASKS_DB.find(t=>t.id===tid), uid: Math.random(), status: 'PENDING' })),
+             tasks: activeCall.data.orders.map(tid => {
+                 // Safety Fallback: ป้องกัน Task หายแล้วเกมพัง
+                 const t = TASKS_DB.find(x => x.id === tid) || TASKS_DB[0];
+                 return { ...t, uid: Math.random(), status: 'PENDING' };
+             }),
              nurseId: [], 
              actionProgress: 0, 
              condition: initCondition, 
@@ -921,8 +928,11 @@ export default function NurseCommanderPro() {
            setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
            setScore(s => s + 50 + xpBonus);
            if(user && xpBonus > 0) {
-               // Instant XP update for fun
-               setUser(prev => ({...prev, xp: prev.xp + xpBonus}));
+               // Instant XP update for fun with Safety Check
+               setUser(prev => {
+                   if(!prev) return null; // ป้องกัน Crash ถ้า User State ไม่พร้อม
+                   return {...prev, xp: prev.xp + xpBonus};
+               });
            }
            
            showToast(msg, type);
