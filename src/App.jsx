@@ -277,35 +277,60 @@ export default function NurseCommanderPro() {
 
   // --- AUTH CHECK ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setAuthLoading(true);
-      if (currentUser) {
-        // Fetch User Data from Firestore
-        const docRef = doc(db, "users", currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          setUser({ ...docSnap.data(), uid: currentUser.uid });
-        } else {
-          // If no profile (rare case), create default
-          const newUser = {
-            nickname: currentUser.email.split('@')[0],
-            email: currentUser.email,
-            xp: 0,
-            matches: 0,
-            wins: 0
-          };
-          await setDoc(doc(db, "users", currentUser.uid), newUser);
-          setUser({ ...newUser, uid: currentUser.uid });
+    // Timeout Safety: 3 seconds max loading
+    const safetyTimer = setTimeout(() => {
+        if (phase === 'LOADING') {
+            setAuthLoading(false);
+            setPhase('LOGIN');
         }
-        setPhase('MENU');
-      } else {
-        setUser(null);
+    }, 3000);
+
+    const unsubscribe = onAuthStateChanged(auth, 
+      async (currentUser) => {
+        if (currentUser) {
+          try {
+            const docRef = doc(db, "users", currentUser.uid);
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists()) {
+              setUser({ ...docSnap.data(), uid: currentUser.uid });
+            } else {
+              const newUser = {
+                nickname: currentUser.email.split('@')[0],
+                email: currentUser.email,
+                xp: 0,
+                matches: 0,
+                wins: 0
+              };
+              await setDoc(doc(db, "users", currentUser.uid), newUser);
+              setUser({ ...newUser, uid: currentUser.uid });
+            }
+            setPhase('MENU');
+          } catch (e) {
+            console.error("Auth Load Error:", e);
+            setUser(null);
+            setPhase('LOGIN');
+          }
+        } else {
+          setUser(null);
+          setPhase('LOGIN');
+        }
+        setAuthLoading(false);
+        clearTimeout(safetyTimer);
+      }, 
+      (error) => {
+        // Error Handler (e.g., Auth disabled)
+        console.error("Auth Error:", error);
+        setAuthLoading(false);
         setPhase('LOGIN');
+        clearTimeout(safetyTimer);
       }
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
+    );
+
+    return () => {
+        unsubscribe();
+        clearTimeout(safetyTimer);
+    }
   }, []);
 
   // --- LEADERBOARD FETCH ---
