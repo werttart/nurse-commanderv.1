@@ -12,7 +12,7 @@ import {
   Smile, Frown, Meh, Zap, Coffee, Shield, Ghost,
   ThumbsDown, ThumbsUp, Sparkles, Angry, Flame,
   Volume2, VolumeX, Trophy, Medal, Crown, UserCircle,
-  Edit, Save, ShoppingBag
+  Edit, Save, ShoppingBag, Biohazard, Droplets, UserX, MessageSquare
 } from 'lucide-react';
 // Firebase Imports
 import { initializeApp } from "firebase/app";
@@ -62,6 +62,8 @@ const cssStyles = `
   @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
   @keyframes level-up { 0% { transform: scale(1); } 50% { transform: scale(1.2); color: #fbbf24; } 100% { transform: scale(1); } }
   .anim-level { animation: level-up 0.5s ease-out; }
+  .biohazard-pulse { animation: bio-pulse 2s infinite; }
+  @keyframes bio-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; color: #ef4444; } 100% { opacity: 0.5; } }
 `;
 
 // ==========================================
@@ -98,6 +100,8 @@ const SoundSystem = {
         osc.type = 'triangle'; osc.frequency.setValueAtTime(440, now); osc.frequency.setValueAtTime(554, now + 0.1); osc.frequency.setValueAtTime(659, now + 0.2); gain.gain.setValueAtTime(0.1, now); gain.gain.linearRampToValueAtTime(0, now + 0.4); osc.start(now); osc.stop(now + 0.4);
       } else if (type === 'CLICK') {
         osc.type = 'sine'; osc.frequency.setValueAtTime(800, now); gain.gain.setValueAtTime(0.05, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05); osc.start(now); osc.stop(now + 0.05);
+      } else if (type === 'WASH') {
+        osc.type = 'sine'; osc.frequency.setValueAtTime(400, now); osc.frequency.linearRampToValueAtTime(600, now + 0.2); gain.gain.setValueAtTime(0.05, now); gain.gain.linearRampToValueAtTime(0, now + 0.3); osc.start(now); osc.stop(now + 0.3);
       }
     } catch (e) {}
   }
@@ -172,18 +176,20 @@ const TASKS_DB = [
   { id: 'INTUBATE', label: 'Assist Intubation', type: 'CRITICAL', cost: 500, price: 3000, duration: 50, role: ['RN', 'HEAD'], xp: 80 },
   { id: 'ADMIT', label: 'Admission Process', type: 'ADMIN', cost: 10, price: 0, duration: 40, role: ['RN', 'HEAD'], xp: 10 },
   { id: 'DC', label: 'Discharge Process', type: 'ADMIN', cost: 5, price: 0, duration: 45, role: ['RN', 'HEAD'], xp: 10 },
+  { id: 'TALK', label: 'Talk to Relative', type: 'ADMIN', cost: 0, price: 0, duration: 10, role: ['RN', 'HEAD', 'JR'], xp: 5 }, // Visitor Task
+  { id: 'WASH', label: 'Wash Hands', type: 'BASIC', cost: 2, price: 0, duration: 5, role: ['PN', 'JR', 'RN', 'HEAD'], xp: 2 }, // Infection Task
 ];
 
 const PATIENT_TEMPLATES = [
-  { dx: 'Septic Shock', triage: 'RED', vitals: { hr: 120, bp_sys: 85, spo2: 90, temp: 38.8 }, orders: ['IV', 'BLOOD', 'VS', 'FOLEY'] },
-  { dx: 'Acute MI (STEMI)', triage: 'RED', vitals: { hr: 110, bp_sys: 150, spo2: 94, temp: 36.5 }, orders: ['IV', 'BLOOD', 'VS'] },
-  { dx: 'Status Epilepticus', triage: 'RED', vitals: { hr: 130, bp_sys: 140, spo2: 88, temp: 37.5 }, orders: ['IV', 'SUCTION', 'VS'] },
-  { dx: 'CHF Exacerbation', triage: 'YELLOW', vitals: { hr: 100, bp_sys: 160, spo2: 92, temp: 36.8 }, orders: ['IV', 'VS', 'FOLEY'] },
-  { dx: 'DKA (Mild)', triage: 'YELLOW', vitals: { hr: 110, bp_sys: 110, spo2: 96, temp: 37.0 }, orders: ['IV', 'BLOOD', 'VS'] },
-  { dx: 'Ischemic Stroke', triage: 'YELLOW', vitals: { hr: 80, bp_sys: 170, spo2: 96, temp: 37.0 }, orders: ['NG', 'CARE', 'VS'] },
-  { dx: 'Post-Op Appeny', triage: 'GREEN', vitals: { hr: 80, bp_sys: 120, spo2: 99, temp: 37.0 }, orders: ['WOUND', 'IV'] },
-  { dx: 'Gastroenteritis', triage: 'GREEN', vitals: { hr: 90, bp_sys: 110, spo2: 98, temp: 37.5 }, orders: ['IV', 'VS'] },
-  { dx: 'Cellulitis Leg', triage: 'GREEN', vitals: { hr: 85, bp_sys: 125, spo2: 98, temp: 37.2 }, orders: ['IV', 'WOUND'] },
+  { dx: 'Septic Shock', triage: 'RED', vitals: { hr: 120, bp_sys: 85, spo2: 90, temp: 38.8 }, orders: ['IV', 'BLOOD', 'VS', 'FOLEY'], infectious: true },
+  { dx: 'Acute MI (STEMI)', triage: 'RED', vitals: { hr: 110, bp_sys: 150, spo2: 94, temp: 36.5 }, orders: ['IV', 'BLOOD', 'VS'], infectious: false },
+  { dx: 'Status Epilepticus', triage: 'RED', vitals: { hr: 130, bp_sys: 140, spo2: 88, temp: 37.5 }, orders: ['IV', 'SUCTION', 'VS'], infectious: false },
+  { dx: 'CHF Exacerbation', triage: 'YELLOW', vitals: { hr: 100, bp_sys: 160, spo2: 92, temp: 36.8 }, orders: ['IV', 'VS', 'FOLEY'], infectious: false },
+  { dx: 'DKA (Mild)', triage: 'YELLOW', vitals: { hr: 110, bp_sys: 110, spo2: 96, temp: 37.0 }, orders: ['IV', 'BLOOD', 'VS'], infectious: false },
+  { dx: 'Ischemic Stroke', triage: 'YELLOW', vitals: { hr: 80, bp_sys: 170, spo2: 96, temp: 37.0 }, orders: ['NG', 'CARE', 'VS'], infectious: false },
+  { dx: 'Post-Op Appeny', triage: 'GREEN', vitals: { hr: 80, bp_sys: 120, spo2: 99, temp: 37.0 }, orders: ['WOUND', 'IV'], infectious: false },
+  { dx: 'Gastroenteritis', triage: 'GREEN', vitals: { hr: 90, bp_sys: 110, spo2: 98, temp: 37.5 }, orders: ['IV', 'VS'], infectious: true },
+  { dx: 'Cellulitis Leg', triage: 'GREEN', vitals: { hr: 85, bp_sys: 125, spo2: 98, temp: 37.2 }, orders: ['IV', 'WOUND'], infectious: true },
 ];
 
 const CRITICAL_EVENTS = [
@@ -278,6 +284,9 @@ export default function NurseCommanderPro() {
   // --- UPGRADES STATE ---
   const [wardUpgrades, setWardUpgrades] = useState({ SPEED: 0, COMFORT: 0, RECOVERY: 0 });
   const [showShop, setShowShop] = useState(false);
+
+  // --- NEW FEATURES STATE ---
+  const [doctorRoundsTriggered, setDoctorRoundsTriggered] = useState(false);
 
   // Lock refs for anti-spam
   const isAdmittingRef = useRef(false);
@@ -518,7 +527,9 @@ export default function NurseCommanderPro() {
         traits: assignedTraits,
         xp: 0,
         level: 1,
-        maxXp: 100
+        maxXp: 100,
+        isSick: false, // New: Sick state
+        isContaminated: false // New: Infection state
       };
     });
 
@@ -534,6 +545,7 @@ export default function NurseCommanderPro() {
     setFinancials({ revenue: 0, cost: 0, profit: 0 });
     setShiftCount(1);
     setSimTime(28800);
+    setDoctorRoundsTriggered(false);
     setTimeline([{ time: '08:00', text: `Shift 1 Started. Mode: ${gameMode}`, type: 'INFO' }]);
     setPhase('GAME');
   };
@@ -577,8 +589,42 @@ export default function NurseCommanderPro() {
       condition: 100,
       satisfaction: 50 + Math.floor(Math.random() * 30),
       complaints: [],
-      satTrend: 0 
+      satTrend: 0,
+      hasVisitor: false, // New: Visitor
+      isInfectious: template.infectious // New: Infection
     };
+  };
+
+  // --- NEW ACTIONS ---
+  const washHands = (staffId) => {
+      setStaff(prev => prev.map(s => {
+          if(s.id === staffId && s.isContaminated) {
+              SoundSystem.play('WASH');
+              showToast(`${s.name} washed hands.`, 'success');
+              // Create artificial delay logic if needed, but for now instant clean
+              // To make it engaging, we could assign a "WASH" task to themselves
+              return { ...s, isContaminated: false };
+          }
+          return s;
+      }));
+  };
+
+  const triggerDoctorRounds = () => {
+      setBeds(prev => prev.map(b => {
+          if(b.status === 'OCCUPIED') {
+              const newTasks = [];
+              const count = 1 + Math.floor(Math.random() * 2); // 1-2 new tasks
+              for(let i=0; i<count; i++) {
+                  const task = TASKS_DB[Math.floor(Math.random() * (TASKS_DB.length - 2))]; // Exclude ADMIT/DC
+                  newTasks.push({...task, uid: Math.random(), status: 'PENDING'});
+              }
+              return { ...b, tasks: [...b.tasks, ...newTasks] };
+          }
+          return b;
+      }));
+      showToast("DOCTOR ROUNDS! New orders added!", "warning");
+      SoundSystem.play('ALARM');
+      logTimeline("Doctor rounds completed. Workload increased.", "info");
   };
 
   useEffect(() => {
@@ -598,6 +644,13 @@ export default function NurseCommanderPro() {
         if (calculatedShift > shiftCount) {
             handleAutoShiftChange(calculatedShift);
         }
+        
+        // DOCTOR ROUNDS EVENT at 10:00 AM (36000s)
+        if (!doctorRoundsTriggered && nextTime >= 36000 && nextTime < 36100) {
+            triggerDoctorRounds();
+            setDoctorRoundsTriggered(true);
+        }
+
         return nextTime;
       });
 
@@ -610,6 +663,22 @@ export default function NurseCommanderPro() {
       if (rand < 0.002 * gameSpeed && !activeAlert) triggerCriticalEvent();
       if (rand < 0.03 * gameSpeed) addRandomTask();
       if (rand < 0.003 * gameSpeed) addDischargeOrder();
+      
+      // VISITOR SPAWN (Low chance)
+      if (rand < 0.005 * gameSpeed) {
+          setBeds(prev => {
+              const occupied = prev.filter(b => b.status === 'OCCUPIED' && !b.hasVisitor);
+              if(occupied.length === 0) return prev;
+              const target = occupied[Math.floor(Math.random() * occupied.length)];
+              const talkTask = TASKS_DB.find(t => t.id === 'TALK');
+              return prev.map(b => b.id === target.id ? { 
+                  ...b, 
+                  hasVisitor: true,
+                  tasks: [...b.tasks, { ...talkTask, uid: Math.random(), status: 'PENDING' }] 
+              } : b);
+          });
+          showToast("A visitor is disturbing a patient!", "warning");
+      }
 
       updateBeds();
       updateStaff();
@@ -617,7 +686,7 @@ export default function NurseCommanderPro() {
     }, 100); // เปลี่ยนจาก 50 เป็น 100 ms
 
     return () => clearInterval(loopRef.current);
-  }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount, wardUpgrades]);
+  }, [phase, gameSpeed, activeAlert, activeCall, beds, staff, shiftCount, wardUpgrades, doctorRoundsTriggered]);
 
   const handleAutoShiftChange = (newShiftVal) => {
     const shiftWages = staff.reduce((sum, s) => sum + s.shiftWage, 0);
@@ -632,6 +701,7 @@ export default function NurseCommanderPro() {
       endGame(true);
     } else {
       setShiftCount(newShiftVal);
+      setDoctorRoundsTriggered(false); // Reset Doctor rounds for next day (if endless) or just reset logic
       const msg = `Shift ${newShiftVal} Started! Wages deducted: ${formatMoney(shiftWages)}`;
       showToast(msg, 'info');
       logTimeline(`Shift ${newShiftVal-1} ended. Wages paid. Shift ${newShiftVal} started.`, 'info');
@@ -640,9 +710,24 @@ export default function NurseCommanderPro() {
       const recoveryBonus = 1 + (wardUpgrades.RECOVERY * 0.1); 
       
       setStaff(prev => prev.map(s => {
+        // BURNOUT & SICK LOGIC
+        let isSick = false;
+        if (s.stamina < 30) {
+            // If stamina low at end of shift -> chance to be sick
+            if (Math.random() < 0.3) {
+                isSick = true;
+                logTimeline(`${s.name} called in sick due to burnout!`, 'bad');
+            }
+        }
+
         const baseRecovery = s.traits.includes('STAMINA') ? 50 : 30;
         const totalRecovery = Math.floor(baseRecovery * recoveryBonus);
-        return { ...s, stamina: Math.min(100, s.stamina + totalRecovery) };
+        return { 
+            ...s, 
+            isSick: isSick,
+            status: isSick ? 'SICK' : 'IDLE',
+            stamina: Math.min(100, s.stamina + totalRecovery) 
+        };
       }));
     }
   };
@@ -670,6 +755,11 @@ export default function NurseCommanderPro() {
       if (pendingTasks > 2) satChange -= 0.04 * gameSpeed; 
       if (bed.condition < 50) satChange -= 0.02 * gameSpeed; 
       
+      // VISITOR EFFECT
+      if (bed.hasVisitor) {
+          satChange -= 0.1 * gameSpeed; // Drain sat fast
+      }
+
       // Apply Comfort Upgrade Logic (Reduce satisfaction loss)
       if (satChange < 0 && wardUpgrades.COMFORT > 0) {
           satChange = satChange * (1 - (wardUpgrades.COMFORT * 0.1)); // Reduce loss by 10% per level
@@ -751,9 +841,24 @@ export default function NurseCommanderPro() {
     try {
         SoundSystem.play('CLICK');
         const nurse = staff.find(n => n.id === nurseId);
+        const targetBed = beds.find(b => b.id === bedId);
         
         // SAFETY CHECK: Check if nurse exists
         if (!nurse) return;
+        if (nurse.isSick) return showToast('Staff is on sick leave!', 'error');
+
+        // INFECTION LOGIC: Cross Contamination Check
+        // If nurse is contaminated AND patient is NOT infectious -> Spread Infection
+        if (nurse.isContaminated && targetBed && !targetBed.isInfectious && task.type !== 'ADMIN') {
+            showToast(`⚠ CROSS CONTAMINATION! ${nurse.name} infected the patient!`, 'error');
+            SoundSystem.play('ERROR');
+            setBeds(prev => prev.map(b => b.id === bedId ? { 
+                ...b, 
+                isInfectious: true, // Patient becomes infectious
+                condition: b.condition - 20, // Condition drop
+                satisfaction: b.satisfaction - 20 
+            } : b));
+        }
 
         if (nurse.status !== 'IDLE') return showToast('Staff not available', 'error');
         if (!task.role.includes(nurse.roleKey)) {
@@ -789,6 +894,8 @@ export default function NurseCommanderPro() {
         const workerIds = bed.nurseId;
         const nurses = staff.filter(s => workerIds.includes(s.id));
         let isSuccess = true;
+        let becameContaminated = false;
+
         nurses.forEach(n => {
             if (n.traits.includes('CLUMSY') && Math.random() < 0.05) {
                 isSuccess = false;
@@ -805,6 +912,11 @@ export default function NurseCommanderPro() {
                 satisfaction: Math.max(0, b.satisfaction - 10) 
             } : b));
             return; 
+        }
+
+        // INFECTION LOGIC: Staff gets contaminated
+        if (bed.isInfectious && task.type !== 'ADMIN') { // Admin tasks don't touch patient
+            becameContaminated = true;
         }
 
         setFinancials(prev => ({
@@ -837,12 +949,24 @@ export default function NurseCommanderPro() {
             let newLevel = s.level;
             let newMaxXp = s.maxXp;
             let newSkill = s.skill;
+            let newContaminated = s.isContaminated;
+            
+            if (becameContaminated && !s.isContaminated) {
+                newContaminated = true;
+                // showToast(`${s.name} is contaminated! Wash hands!`, 'warning'); // Optional spam reduction
+            }
+
             if (newXp >= newMaxXp) {
                newLevel += 1; newXp = newXp - newMaxXp; newMaxXp = Math.floor(newMaxXp * 1.5); newSkill += 1;
                showToast(`${s.name} Leveled Up to ${newLevel}!`, 'success');
                SoundSystem.play('LEVELUP');
             }
-            return { ...s, status: 'IDLE', action: null, targetBedId: null, xp: newXp, level: newLevel, maxXp: newMaxXp, skill: newSkill };
+            return { 
+                ...s, 
+                status: 'IDLE', action: null, targetBedId: null, 
+                xp: newXp, level: newLevel, maxXp: newMaxXp, skill: newSkill,
+                isContaminated: newContaminated
+            };
           }
           return s;
         }));
@@ -850,9 +974,14 @@ export default function NurseCommanderPro() {
         setBeds(prev => prev.map(b => {
           if (b.id === bed.id) {
              if (task.id === 'DC') return { id: b.id, status: 'EMPTY', name: 'ว่าง', tasks: [] };
+             
+             // Visitor Logic: If TALK is done, remove visitor
+             const visitorRemoved = task.id === 'TALK' ? false : b.hasVisitor;
+             
              return {
                ...b, nurseId: [], tasks: b.tasks.filter(t => t.uid !== task.uid),
-               satisfaction: projectedSat, complaints: updatedComplaints
+               satisfaction: projectedSat, complaints: updatedComplaints,
+               hasVisitor: visitorRemoved
              };
           }
           return b;
@@ -1009,7 +1138,9 @@ export default function NurseCommanderPro() {
                  condition: initCondition, 
                  satisfaction: initSat, 
                  complaints: [], 
-                 satTrend: 0 
+                 satTrend: 0,
+                 hasVisitor: false,
+                 isInfectious: activeCall.data.infectious // Set from template
                };
                
                setBeds(prev => prev.map(b => b.id === emptyBed.id ? newPatient : b));
@@ -1334,7 +1465,10 @@ export default function NurseCommanderPro() {
              <div className="flex items-center gap-4">
                 <div className={`p-2 rounded-lg font-bold ${triageColor} border-2 border-white`}>{selectedBed.triage} ZONE</div>
                 <div>
-                   <h2 className="text-xl md:text-2xl font-bold truncate max-w-[150px] md:max-w-none">{selectedBed.name}</h2>
+                   <h2 className="text-xl md:text-2xl font-bold truncate max-w-[150px] md:max-w-none">
+                       {selectedBed.name}
+                       {selectedBed.isInfectious && <span className="ml-2 text-red-400 animate-pulse inline-flex items-center gap-1 text-xs bg-black/20 px-2 rounded"><Biohazard size={12}/> INFECTIOUS</span>}
+                   </h2>
                    <div className="text-sm opacity-70">HN: {selectedBed.hn} | Age: {selectedBed.age}</div>
                 </div>
              </div>
@@ -1367,6 +1501,11 @@ export default function NurseCommanderPro() {
                         </div>
                     ) : (
                         <div className="text-xs text-green-600 flex items-center gap-1"><ThumbsUp size={12}/> No active complaints</div>
+                    )}
+                    {selectedBed.hasVisitor && (
+                        <div className="mt-2 bg-orange-100 p-2 rounded border border-orange-200 text-orange-700 text-xs font-bold flex items-center gap-2 animate-pulse">
+                            <MessageSquare size={14}/> Angry Relative is here!
+                        </div>
                     )}
                 </div>
                 <div className="mb-6">
@@ -1415,15 +1554,19 @@ export default function NurseCommanderPro() {
                               {staff.map(s => {
                                   const canDo = task.role.includes(s.roleKey);
                                   const isFree = s.status === 'IDLE';
+                                  // Can't assign if contaminated unless task is admin or wash
+                                  const isRisky = s.isContaminated && !selectedBed.isInfectious && task.type !== 'ADMIN' && task.id !== 'WASH';
                                   return (
-                                    <button key={s.id} disabled={!isFree} onClick={() => assignTask(s.id, selectedBed.id, task)}
-                                      className={`px-3 py-2 rounded border flex items-center gap-2 ${!canDo ? 'opacity-30 cursor-not-allowed bg-slate-100' : isFree ? 'hover:bg-blue-100 border-slate-300 hover:border-blue-500' : 'opacity-50 bg-slate-100'}`}>
+                                    <button key={s.id} disabled={!isFree || s.isSick} onClick={() => assignTask(s.id, selectedBed.id, task)}
+                                      className={`px-3 py-2 rounded border flex items-center gap-2 relative ${!canDo || s.isSick ? 'opacity-30 cursor-not-allowed bg-slate-100' : isFree ? 'hover:bg-blue-100 border-slate-300 hover:border-blue-500' : 'opacity-50 bg-slate-100'}`}>
                                           <span className="text-lg">{s.icon}</span>
+                                          {s.isContaminated && <Biohazard size={12} className="absolute -top-1 -right-1 text-red-500 animate-pulse"/>}
+                                          {s.isSick && <UserX size={12} className="absolute -top-1 -right-1 text-slate-500"/>}
                                           <div className="text-left">
                                              <div className="text-xs font-bold">{s.name}</div>
                                              <div className={`text-[9px] ${s.stamina < 30 ? 'text-red-500' : 'text-green-500'}`}>{Math.round(s.stamina)}% En</div>
                                           </div>
-                                          <div className="bg-yellow-100 text-yellow-700 text-[8px] px-1 rounded font-bold ml-1">Lv.{s.level}</div>
+                                          {isRisky && <div className="absolute inset-0 border-2 border-red-500/50 rounded pointer-events-none"></div>}
                                     </button>
                                   )
                               })}
@@ -1754,7 +1897,15 @@ export default function NurseCommanderPro() {
                             <div className="flex flex-col items-center justify-center h-full text-slate-600"><Skull size={40}/><span className="font-bold mt-2">DECEASED</span></div>
                          ) : (
                             <>
-                               <div className="flex justify-between items-start mb-2"><span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span><div className="flex gap-1">{isCrit && <AlertTriangle size={16} className="text-red-600"/>}{bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}</div></div>
+                               <div className="flex justify-between items-start mb-2">
+                                   <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">BED {bed.id}</span>
+                                   <div className="flex gap-1">
+                                       {bed.isInfectious && <Biohazard size={16} className="text-purple-600 animate-pulse"/>}
+                                       {bed.hasVisitor && <MessageSquare size={16} className="text-orange-500 animate-bounce"/>}
+                                       {isCrit && <AlertTriangle size={16} className="text-red-600"/>}
+                                       {bed.complaints.length > 0 && <ShieldAlert size={16} className="text-red-500 animate-bounce"/>}
+                                   </div>
+                               </div>
                                <div className="bg-black rounded h-12 mb-2 relative overflow-hidden border border-slate-700 flex items-center px-2"><div className="absolute inset-0 opacity-20 ecg-line"></div><div className="relative z-10 w-full flex justify-between font-mono text-green-400 text-[10px] md:text-xs"><div className="flex flex-col"><span>HR {Math.round(bed.currentVitals.hr)}</span><span>BP {Math.round(bed.currentVitals.bp_sys)}</span></div><div className="flex flex-col items-end"><span>O2 {Math.round(bed.currentVitals.spo2)}%</span><span>T {bed.currentVitals.temp.toFixed(1)}</span></div></div></div>
                                <div className="font-bold text-sm truncate text-slate-800">{bed.name}</div>
                                <div className="text-xs text-slate-500 truncate mb-1">{bed.dx}</div>
@@ -1767,7 +1918,7 @@ export default function NurseCommanderPro() {
                                      </div>
                                   ) : (
                                      <div className="flex gap-1 flex-wrap">
-                                        {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (<span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500':'bg-blue-400'}`}></span>))}
+                                        {bed.tasks.filter(t=>t.status==='PENDING').slice(0, 3).map((t, i) => (<span key={i} className={`w-2 h-2 rounded-full ${t.type==='CRITICAL'?'bg-red-500':t.type==='SKILLED'?'bg-purple-500': t.id==='WASH' ? 'bg-blue-300' : t.id==='TALK' ? 'bg-orange-400' : 'bg-blue-400'}`}></span>))}
                                         {bed.tasks.length > 3 && <span className="text-[9px] text-slate-400">+{bed.tasks.length-3}</span>}
                                         {bed.tasks.length === 0 && <span className="text-[10px] text-green-500 font-bold flex items-center gap-1"><CheckCircle size={10}/> Stable</span>}
                                      </div>
@@ -1788,17 +1939,34 @@ export default function NurseCommanderPro() {
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
                {staff.map(s => (
-                  <div key={s.id} className={`border rounded-xl p-3 shadow-sm transition-all ${s.status === 'IDLE' ? 'bg-white border-slate-200' : s.status==='CPR' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <div key={s.id} className={`border rounded-xl p-3 shadow-sm transition-all ${s.status === 'IDLE' ? 'bg-white border-slate-200' : s.status==='CPR' || s.status==='SICK' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
                       <div className="flex justify-between items-start mb-2">
                          <div className="flex items-center gap-2">
-                            <div className="text-xl bg-slate-100 p-1 rounded relative">{s.icon}<div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">{s.level}</div></div>
-                            <div><div className="font-bold text-sm text-slate-800 flex items-center gap-1">{s.name}</div><div className="text-[10px] text-slate-500">{s.label}</div></div>
+                            <div className="text-xl bg-slate-100 p-1 rounded relative">
+                                {s.icon}
+                                <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-slate-900 text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold border border-white">{s.level}</div>
+                                {s.isContaminated && <Biohazard size={12} className="absolute -top-1 -right-1 text-red-500 animate-pulse"/>}
+                            </div>
+                            <div>
+                                <div className="font-bold text-sm text-slate-800 flex items-center gap-1">
+                                    {s.name}
+                                    {s.isSick && <span className="text-[10px] text-red-500 bg-red-100 px-1 rounded ml-1">SICK</span>}
+                                </div>
+                                <div className="text-[10px] text-slate-500">{s.label}</div>
+                            </div>
                          </div>
-                         <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='CPR'?'bg-red-600 text-white animate-pulse':'bg-blue-100 text-blue-700'}`}>{s.status}</div>
+                         <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.status==='IDLE'?'bg-green-100 text-green-700':s.status==='SICK' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>{s.status}</div>
                       </div>
                       <div className="mb-2"><div className="flex justify-between text-[8px] text-slate-400 mb-0.5"><span>EXP</span><span>{Math.floor(s.xp)}/{s.maxXp}</span></div><div className="h-1 bg-slate-100 rounded-full w-full"><div className="h-full bg-yellow-400 rounded-full transition-all" style={{width: `${(s.xp/s.maxXp)*100}%`}}></div></div></div>
                       <div className="mb-2 flex gap-1 flex-wrap">{s.traits.map(tKey => {const T = STAFF_TRAITS[tKey]; return (<div key={tKey} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${T.type === 'POS' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={T.desc}>{T.icon && <T.icon size={10}/>} {T.name}</div>)})}</div>
                       <div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${s.stamina < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${s.stamina}%`}}></div></div><span className="text-[9px] text-slate-400 font-mono">{Math.round(s.stamina)}%</span></div>
+                      
+                      {s.isContaminated && s.status === 'IDLE' && (
+                          <button onClick={() => washHands(s.id)} className="mt-2 w-full bg-blue-100 hover:bg-blue-200 text-blue-600 text-xs font-bold py-1 rounded flex items-center justify-center gap-1 animate-pulse">
+                              <Droplets size={12}/> WASH HANDS
+                          </button>
+                      )}
+                      
                       {s.targetBedId && (<div className="mt-2 text-xs flex items-center justify-between bg-white/50 p-1 rounded"><span className="text-slate-500 flex items-center gap-1"><ArrowRight size={10}/> Bed {s.targetBedId}</span><span className="font-bold text-blue-600 truncate max-w-[100px]">{s.action}</span></div>)}
                   </div>
                ))}
