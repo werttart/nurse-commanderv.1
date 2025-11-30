@@ -1846,11 +1846,15 @@ export default function NurseCommanderPro() {
       {renderShop()}
 
       <div className={`h-16 ${WardConfig.color} text-white flex items-center justify-between px-4 shadow-lg z-40 shrink-0`}>
-         <div className="flex items-center gap-3">
-            <div className="bg-white/20 p-2 rounded-lg"><WardIcon/></div>
-            <div>
-               <h1 className="font-bold text-lg leading-none truncate max-w-[150px] md:max-w-none">{WardConfig.name} Ward</h1>
-               <div className="text-[10px] opacity-80 flex gap-2"><span>{gameMode === 'RANKING' ? '🏆 RANKED' : '🕹️ NORMAL'}</span><span>|</span><span>Target: {config.endlessMode ? <span className="font-bold">∞</span> : config.targetShifts} Shifts</span></div>
+         <div className="flex items-center gap-3 overflow-hidden">
+            <div className="bg-white/20 p-2 rounded-lg shrink-0"><WardIcon/></div>
+            <div className="min-w-0">
+               <h1 className="font-bold text-lg leading-none truncate">{WardConfig.name} Ward</h1>
+               <div className="text-[10px] opacity-80 flex gap-2 whitespace-nowrap">
+                   <span>{gameMode === 'RANKING' ? '🏆 RANKED' : '🕹️ NORMAL'}</span>
+                   <span className="hidden md:inline">|</span>
+                   <span className="hidden md:inline">Target: {config.endlessMode ? <span className="font-bold">∞</span> : config.targetShifts} Shifts</span>
+               </div>
             </div>
          </div>
 
@@ -1864,14 +1868,25 @@ export default function NurseCommanderPro() {
             <div className="flex items-center gap-2 text-white"><Clock size={16}/><span className="font-mono font-bold text-lg">{formatTime(simTime)}</span></div>
          </div>
 
-         <div className="flex items-center gap-2">
+         <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setShowShop(true)} className="p-2 rounded-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 transition-all shadow-lg animate-pulse" title="Ward Shop">
                 <ShoppingBag size={20}/>
             </button>
-            <div className="md:hidden font-mono font-bold text-white text-sm mr-2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded"><Clock size={12}/> {formatTime(simTime)}</div>
-            <button onClick={toggleSound} className={`p-2 rounded-full transition-all ${soundEnabled ? 'bg-white/20 text-white' : 'bg-red-500/20 text-red-300'}`}>{soundEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button>
+            
+            {/* Time display - Compact on mobile */}
+            <div className="md:hidden font-mono font-bold text-white text-sm flex items-center gap-1 bg-black/20 px-2 py-1 rounded"><Clock size={12}/> {formatTime(simTime)}</div>
+            
+            {/* Sound button - Hidden on mobile to save space */}
+            <button onClick={toggleSound} className={`hidden md:block p-2 rounded-full transition-all ${soundEnabled ? 'bg-white/20 text-white' : 'bg-red-500/20 text-red-300'}`}>{soundEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}</button>
+            
+            {/* Pause button */}
             <button onClick={() => setGameSpeed(s => s === 0 ? 1 : 0)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-all">{gameSpeed === 0 ? <Play fill="currentColor"/> : <Pause fill="currentColor"/>}</button>
-            <button onClick={() => endGame(false)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg transition-all flex flex-col items-center leading-none"><Flag size={14} className="mb-0.5"/> FINISH</button>
+            
+            {/* Finish button - Icon only on mobile */}
+            <button onClick={() => endGame(false)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg transition-all flex flex-col md:flex-row items-center justify-center gap-1 leading-none">
+                <Flag size={14} /> 
+                <span className="hidden md:inline">FINISH</span>
+            </button>
          </div>
       </div>
 
