@@ -327,17 +327,19 @@ export default function NurseCommanderPro() {
     }
   }, []);
 
-  // --- LEADERBOARD FETCH ---
+  // --- LEADERBOARD FETCH (CLEAN VERSION) ---
   useEffect(() => {
     if (phase === 'LEADERBOARD') {
         const fetchLeaderboard = async () => {
             try {
+                // ดึงข้อมูล 10 อันดับแรกโดยตรง (Database สะอาดแล้ว)
                 const q = query(collection(db, "leaderboard"), orderBy("xp", "desc"), limit(10));
                 const querySnapshot = await getDocs(q);
                 const fetchedData = [];
                 querySnapshot.forEach((doc) => {
                     fetchedData.push(doc.data());
                 });
+                
                 if(fetchedData.length > 0) {
                       const ranked = fetchedData.map((d, index) => ({...d, rank: index + 1}));
                       setLeaderboardData(ranked);
